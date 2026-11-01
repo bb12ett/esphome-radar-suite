@@ -909,6 +909,15 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
 
+  # Optional X-Axis Mirror for Upside-Down (180-deg Rolled) Sensor Enclosures
+  - platform: template
+    name: "Invert X-Axis (Upside-Down Mount)"
+    id: invert_x_switch
+    icon: "mdi:flip-horizontal"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
 # --------------------------------------------------------------------
 # 8. RADAR & ONE-TOUCH ZONE CALIBRATION BUTTONS
 # --------------------------------------------------------------------
@@ -946,8 +955,9 @@ button:
             t.speed = sp_s->get_raw_state();
             t.angle = a_s->get_raw_state();
 
-            if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
-              esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
+            if (!std::isnan(rx) && !std::isnan(ry)) {
+              esphome::presence_memory::sensor_raw_to_room_aligned(
+                  rx, ry, mount_yaw, id(invert_x_switch).state, t.x, t.y);
             } else {
               t.x = rx;
               t.y = ry;
@@ -1006,8 +1016,9 @@ button:
             t.speed = sp_s->get_raw_state();
             t.angle = a_s->get_raw_state();
 
-            if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
-              esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
+            if (!std::isnan(rx) && !std::isnan(ry)) {
+              esphome::presence_memory::sensor_raw_to_room_aligned(
+                  rx, ry, mount_yaw, id(invert_x_switch).state, t.x, t.y);
             } else {
               t.x = rx;
               t.y = ry;
@@ -1204,8 +1215,9 @@ interval:
             t.speed = sp_s->get_raw_state();
             t.angle = a_s->get_raw_state();
 
-            if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
-              esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
+            if (!std::isnan(rx) && !std::isnan(ry)) {
+              esphome::presence_memory::sensor_raw_to_room_aligned(
+                  rx, ry, mount_yaw, id(invert_x_switch).state, t.x, t.y);
             } else {
               t.x = rx;
               t.y = ry;

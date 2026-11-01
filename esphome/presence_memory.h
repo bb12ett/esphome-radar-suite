@@ -40,6 +40,17 @@ inline void rotate_point(float x, float y, float angle_deg, float &ox, float &oy
   oy = x * s + y * c;
 }
 
+// Convert raw LD2450 chip coordinates (Frame 1: +X = sensor's own right looking out into the room)
+// into top-down Room-Aligned coordinates (Frame 2: +X = room right when facing the front wall,
+// +Y = depth into the room away from the front wall).
+// Standard upright mount (invert_x = false) negates rx before rotating clockwise by mount_yaw_deg.
+// Upside-down 180-deg rolled mount (invert_x = true) keeps +rx.
+inline void sensor_raw_to_room_aligned(float rx, float ry, float mount_yaw_deg, bool invert_x,
+                                       float &ox, float &oy) {
+  float lx = invert_x ? rx : -rx;
+  rotate_point(lx, ry, mount_yaw_deg, ox, oy);
+}
+
 inline bool is_raw_tracked(const TargetData &t) {
   return (t.raw_active || t.active) && !std::isnan(t.dist) && t.dist > 0.0f &&
          !std::isnan(t.x) && !std::isnan(t.y);

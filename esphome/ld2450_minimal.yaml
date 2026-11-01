@@ -551,6 +551,14 @@ switch:
     bluetooth:
       name: "Radar Bluetooth"
 
+  - platform: template
+    name: "Invert X-Axis (Upside-Down Mount)"
+    id: invert_x_switch
+    icon: "mdi:flip-horizontal"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
 button:
   - platform: restart
     name: "Restart ESP32"
@@ -561,6 +569,7 @@ interval:
     then:
       - lambda: |-
           bool has_t = id(raw_room_occupancy).state;
+          bool inv_x = id(invert_x_switch).state;
           float yaw_rad = id(sensor_mounting_angle).state * (static_cast<float>(M_PI) / 180.0f);
           float cy = cosf(yaw_rad), sy = sinf(yaw_rad);
 
@@ -579,8 +588,9 @@ interval:
 
           for (int i = 0; i < 3; i++) {
             if (!has_t || std::isnan(rd[i]) || rd[i] <= 0.0f || std::isnan(rx[i]) || std::isnan(ry[i])) continue;
-            tx[i] = rx[i] * cy - ry[i] * sy;
-            ty[i] = rx[i] * sy + ry[i] * cy;
+            float lx = inv_x ? rx[i] : -rx[i];
+            tx[i] = lx * cy - ry[i] * sy;
+            ty[i] = lx * sy + ry[i] * cy;
             if (has_bounds && (tx[i] < min_bx || tx[i] > max_bx || ty[i] < min_by || ty[i] > max_by)) continue;
             valid[i] = true;
             room_cnt++;

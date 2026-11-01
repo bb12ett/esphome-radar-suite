@@ -1,13 +1,13 @@
 /**
  * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
- * Version 1.6.0 - High-Precision mmWave Radar Suite
+ * Version 1.6.1 - High-Precision mmWave Radar Suite
  * 
  * Includes:
  * 1. <radar-map-card>         (Lovelace: custom:radar-map-card)
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.6.0";
+const CARD_VERSION = "1.6.1";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -282,6 +282,7 @@ class RadarEntityResolver {
       max_distance: findEntity("number", "max_distance"),
       exit_trajectory_margin: findEntity("number", "exit_trajectory_margin"),
       multi_target: findEntity("switch", "multi_target_tracking"),
+      invert_x_switch: findFirstExisting("switch", ["invert_x_axis_upside_down_mount", "invert_x_axis", "invert_x"]),
       restart_esp: findEntity("button", "restart_esp32"),
       restart_radar: findEntity("button", "restart_radar"),
       factory_reset_radar: findEntity("button", "factory_reset_radar")
@@ -335,6 +336,15 @@ class RoomGeometry {
     if (config && config.sensor_offset_x !== undefined) sensorOffsetX = parseFloat(config.sensor_offset_x);
     if (config && config.mounting_angle !== undefined) mountingAngle = parseFloat(config.mounting_angle);
 
+    // Optional X-Axis Mirror for Upside-Down (180-deg Rolled) Sensor Enclosures
+    let invertX = false;
+    if (resolvedEntities.invert_x_switch && states[resolvedEntities.invert_x_switch]) {
+      invertX = states[resolvedEntities.invert_x_switch].state === "on";
+    }
+    if (config && config.invert_x !== undefined) {
+      invertX = Boolean(config.invert_x);
+    }
+
     // Compute Sensor Wall Coordinate (sx, sy) relative to room front-left corner (0, 0)
     const cleanWidth = Math.max(1000, roomWidth);
     const cleanDepth = Math.max(1000, roomDepth);
@@ -348,38 +358,42 @@ class RoomGeometry {
       sx: sx,
       sy: sy,
       angle: mountingAngle,
-      sensorOffsetX: sensorOffsetX
+      sensorOffsetX: sensorOffsetX,
+      invertX: invertX
     };
   }
 
   // Frame 1 (raw LD2450 chip) -> Frame 2 (sensor-origin, room-wall-aligned)
-  // Matches ESPHome presence_memory::rotate_point(rx, ry, mount_yaw)
-  static rotateToRoomAligned(xr_mm, yr_mm, angleDeg = 0) {
+  // Matches ESPHome presence_memory::sensor_raw_to_room_aligned(rx, ry, mount_yaw, invert_x)
+  // Raw LD2450 +X is to the sensor's own right (looking out from the sensor into the room).
+  // On a top-down room floorplan with the front mounting wall at the top (Y=0) and +Y extending
+  // down into the room, the sensor's right points LEFT (-X), so standard upright mounts negate
+  // raw X (lx = -xr_mm). Upside-down 180-deg rolled mounts (invertX = true) keep +xr_mm.
+  static rotateToRoomAligned(xr_mm, yr_mm, angleDeg = 0, invertX = false) {
+    const lx = invertX ? xr_mm : -xr_mm;
     if (!angleDeg) {
-      return { x: xr_mm, y: yr_mm };
+      return { x: lx, y: yr_mm };
     }
     const rad = (angleDeg * Math.PI) / 180.0;
     const cosA = Math.cos(rad);
     const sinA = Math.sin(rad);
     return {
-      x: xr_mm * cosA - yr_mm * sinA,
-      y: xr_mm * sinA + yr_mm * cosA
+      x: lx * cosA - yr_mm * sinA,
+      y: lx * sinA + yr_mm * cosA
     };
   }
 
   // Frame 1 (raw LD2450 chip) -> Frame 3 (SVG room coordinates)
   // Used for raw live targets (T1..T3) and hardware exclusion masks (Mask 1..3)
   static transformPoint(xr_mm, yr_mm, geom, invertX = false, invertY = false) {
-    let xr = xr_mm;
-    let yr = yr_mm;
-    if (invertX) xr = -xr;
-    if (invertY) yr = -yr;
+    const effInvertX = Boolean((geom && geom.invertX) ? !invertX : invertX);
+    const yr = invertY ? -yr_mm : yr_mm;
 
     if (!geom) {
-      return { x: xr, y: yr };
+      return { x: effInvertX ? xr_mm : -xr_mm, y: yr };
     }
 
-    const rot = this.rotateToRoomAligned(xr, yr, geom.angle || 0);
+    const rot = this.rotateToRoomAligned(xr_mm, yr, geom.angle || 0, effInvertX);
     return {
       x: geom.sx + rot.x,
       y: geom.sy + rot.y
@@ -1097,7 +1111,7 @@ class RadarMapCard extends HTMLElement {
 
       if (isTargetActive) {
         const pt = RoomGeometry.transformPoint(tx, ty, geom);
-        const rotPt = RoomGeometry.rotateToRoomAligned(tx, ty, geom.angle || 0);
+        const rotPt = RoomGeometry.rotateToRoomAligned(tx, ty, geom.angle || 0, Boolean(geom.invertX));
         const speedEntity = states[ent[`target${t}_speed`]];
         const speedUnit = (speedEntity && speedEntity.attributes && speedEntity.attributes.unit_of_measurement) || "mm/s";
         const speedCmS = speedUnit === "mm/s" ? (speed / 10.0) : (speedUnit === "m/s" ? (speed * 100.0) : speed);
@@ -1394,13 +1408,16 @@ class RadarCalibrationCard extends HTMLElement {
     else if (yaw === 0 && off === 0) preset = "center";
     else preset = "custom";
 
+    const invX = Boolean(ent.invert_x_switch && states[ent.invert_x_switch] && states[ent.invert_x_switch].state === "on");
+
     this._formState = {
       device: this._selectedDevice,
       preset: preset,
       roomWidth: Math.round(rw),
       roomDepth: Math.round(rd),
       sensorOffsetX: Math.round(off),
-      mountingYaw: Math.round(yaw)
+      mountingYaw: Math.round(yaw),
+      invertX: invX
     };
     this._zoneDirty = false;
     this._lastRenderedZone = null;
@@ -1416,6 +1433,8 @@ class RadarCalibrationCard extends HTMLElement {
     if (inpOff) inpOff.value = this._formState.sensorOffsetX;
     const inpYaw = this.shadowRoot.getElementById("inpMountingYaw");
     if (inpYaw) inpYaw.value = this._formState.mountingYaw;
+    const chkInvX = this.shadowRoot.getElementById("chkInvertX");
+    if (chkInvX) chkInvX.checked = invX;
 
     // Populate Tab 4 Engine Inputs
     const setInp = (id, val) => {
@@ -1959,6 +1978,14 @@ class RadarCalibrationCard extends HTMLElement {
               <label class="form-label">Mounting Yaw Angle (°)</label>
               <input type="number" class="form-input" id="inpMountingYaw" placeholder="0 = Facing Room" />
             </div>
+
+            <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end;">
+              <label class="form-label">Enclosure Orientation</label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:0.84rem; cursor:pointer; padding:9px 10px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid var(--border-color);">
+                <input type="checkbox" id="chkInvertX" />
+                <span>Upside-Down Mount (Flip X-Axis)</span>
+              </label>
+            </div>
           </div>
 
 
@@ -2253,6 +2280,19 @@ class RadarCalibrationCard extends HTMLElement {
       });
     }
 
+    const chkInvX = this.shadowRoot.getElementById("chkInvertX");
+    if (chkInvX) {
+      chkInvX.addEventListener("change", () => {
+        this._formState.invertX = Boolean(chkInvX.checked);
+        const entId = this._entities.invert_x_switch;
+        if (entId && this._hass && this._hass.states[entId]) {
+          this._callService("switch", this._formState.invertX ? "turn_on" : "turn_off", { entity_id: entId });
+        }
+        this._showToast(this._formState.invertX ? "Upside-down X-axis flip enabled." : "Standard upright X-axis restored.");
+        this._updateViewfinder();
+      });
+    }
+
     // Save & Flash to ESP32
     const btnFlash = this.shadowRoot.getElementById("btnSaveRoomFlash");
     if (btnFlash) {
@@ -2441,7 +2481,8 @@ class RadarCalibrationCard extends HTMLElement {
       sx: sx,
       sy: sy,
       angle: yaw,
-      sensorOffsetX: off
+      sensorOffsetX: off,
+      invertX: Boolean(this._formState.invertX)
     };
 
     // 1. Update SVG ViewBox & Clip
@@ -2713,7 +2754,8 @@ class RadarCalibrationCard extends HTMLElement {
       sx: (rw / 2) + off,
       sy: 0,
       angle: yaw,
-      sensorOffsetX: off
+      sensorOffsetX: off,
+      invertX: Boolean(this._formState.invertX)
     };
     this._updateVfTargets(previewGeom);
 
@@ -2794,7 +2836,7 @@ class RadarCalibrationCard extends HTMLElement {
     const t1RawY = getVal(ent.target1_y, NaN);
     const hasT1 = Number.isFinite(t1RawX) && Number.isFinite(t1RawY) && t1Dist > 0;
     const t1Aligned = hasT1
-      ? RoomGeometry.rotateToRoomAligned(t1RawX, t1RawY, this._formState.mountingYaw || 0)
+      ? RoomGeometry.rotateToRoomAligned(t1RawX, t1RawY, this._formState.mountingYaw || 0, Boolean(this._formState.invertX))
       : { x: 0, y: 0 };
 
     const rawCalStatus = (ent.zone_status && states[ent.zone_status]) ? states[ent.zone_status].state : "";
@@ -3046,4 +3088,4 @@ if (!customElements.get("presence-calibration-card")) {
   customElements.define("presence-calibration-card", RadarCalibrationCard);
 }
 
-console.log("[PRESENCE-RADAR-CARDS] v1.6.0 High-Precision mmWave Radar Suite initialized.");
+console.log("[PRESENCE-RADAR-CARDS] v1.6.1 High-Precision mmWave Radar Suite initialized.");
