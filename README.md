@@ -147,7 +147,7 @@ This ensures that corner mounts (e.g. $45^\circ$ inward) correctly project detec
 ## 🤖 Built with AI & Human Pair Programming
 
 > [!NOTE]
-> While I do write software, this suite was heavily co-developed and engineered using **AI Antigravity (Gemini 3.8 and 4 Argon)**. From trigonometric spatial coordinate math and high-frequency SVG rendering to mobile-optimized DOM state management and ESPHome C++ tracking engines.
+> While I do write software, this suite was heavily co-developed and engineered using **Antigravity (Gemini 3.8 Flash and 4 Argon)**. From trigonometric spatial coordinate math and high-frequency SVG rendering to mobile-optimized DOM state management and ESPHome C++ tracking engines.
 
 ---
 
