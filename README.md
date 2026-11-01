@@ -10,6 +10,10 @@ An all-in-one, high-precision mmWave radar visualization and onboarding suite fo
 
 Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps. This suite provides real-time target tracking, architectural room boundary modeling with true mounting angle rotation, a walk-in auto-calibration wizard, manual coordinate entry with live map feedback, and hardware exclusion masks in a single, lightweight, zero-dependency bundle.
 
+<p align="center">
+  <img src="images/preview.png" alt="ESPHome mmWave Radar Suite Preview" width="100%" />
+</p>
+
 ---
 
 ## 🌟 Key Features
