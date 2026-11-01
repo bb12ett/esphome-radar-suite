@@ -1,0 +1,2860 @@
+/**
+ * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
+ * Version 1.5.1 - High-Precision mmWave Radar Suite
+ * 
+ * Includes:
+ * 1. <radar-map-card>         (Lovelace: custom:radar-map-card)
+ * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
+ */
+
+const CARD_VERSION = "1.5.5";
+window.customCards = window.customCards || [];
+
+const cardRegistrations = [
+  {
+    type: "radar-map-card",
+    name: "Radar Map Card (LD2450)",
+    description: "Visual mmWave radar presence map with room boundaries, custom sensor placement, multi-target tracking, and detection zones.",
+    preview: true
+  },
+  {
+    type: "radar-calibration-card",
+    name: "Presence Onboarding & Calibration Card (LD2450)",
+    description: "All-in-one onboarding console to configure placement, room boundaries, detection zones, and timeouts for any presence sensor.",
+    preview: true
+  },
+  {
+    type: "presence-calibration-card",
+    name: "Presence Calibration Card (Alias)",
+    description: "All-in-one onboarding console for ESPHome presence sensors.",
+    preview: true
+  }
+];
+
+cardRegistrations.forEach(reg => {
+  if (!window.customCards.some(c => c.type === reg.type)) {
+    window.customCards.push(reg);
+  }
+});
+
+console.info(
+  `%c PRESENCE-RADAR-CARDS %c v${CARD_VERSION} %c Ready `,
+  "background: #0284c7; color: #fff; font-weight: bold; border-radius: 3px 0 0 3px; padding: 2px 5px;",
+  "background: #0f172a; color: #38bdf8; font-weight: bold; padding: 2px 5px;",
+  "background: #10b981; color: #fff; font-weight: bold; border-radius: 0 3px 3px 0; padding: 2px 5px;"
+);
+
+// ====================================================================
+// UTILITY: Robust Dynamic Entity Discovery & Fuzzy Resolution
+// ====================================================================
+class RadarEntityResolver {
+  static getDevices(hass) {
+    if (!hass || !hass.states) return [];
+    const devices = new Map();
+
+    for (const entityId of Object.keys(hass.states)) {
+      // True mmWave radar sensors strictly have Target 1 X coordinates
+      let match = entityId.match(/^sensor\.(.+?)_target_1_x$/);
+      if (!match) match = entityId.match(/^sensor\.(.+?)_t1_x$/);
+
+      if (match) {
+        let rawPrefix = match[1];
+        // Exclude sub-zones or sub-entities
+        if (rawPrefix.includes("_zone_") || rawPrefix.startsWith("zone_")) continue;
+
+        // Clean prefix if it has duplicate area tokens (e.g. living_room_living_room_presence -> living_room_presence)
+        const simplifiedPrefix = rawPrefix.replace(/^([a-z0-9_]+)_\1_/, "$1_");
+        
+        const stateObj = hass.states[entityId];
+        let friendlyName = "";
+        if (stateObj && stateObj.attributes && stateObj.attributes.friendly_name) {
+          friendlyName = stateObj.attributes.friendly_name
+            .replace(/Target 1 X/i, "")
+            .replace(/T1 X/i, "")
+            .trim();
+        }
+        if (!friendlyName) {
+          friendlyName = simplifiedPrefix.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        if (!devices.has(simplifiedPrefix)) {
+          devices.set(simplifiedPrefix, {
+            prefix: simplifiedPrefix,
+            rawPrefix: rawPrefix,
+            name: friendlyName || simplifiedPrefix
+          });
+        }
+      }
+    }
+
+    return Array.from(devices.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  static resolve(hass, config = {}) {
+    const cfg = config || {};
+    const states = (hass && hass.states) || {};
+    let prefix = cfg.device || cfg.prefix || "";
+    
+    if (!prefix) {
+      const devs = RadarEntityResolver.getDevices(hass);
+      if (devs.length > 0) {
+        prefix = devs[0].prefix;
+      } else {
+        prefix = "living_room_presence";
+      }
+    }
+
+    const allEntityIds = Object.keys(states);
+    const tokens = prefix.toLowerCase().split(/[_-\s]+/).filter(Boolean);
+
+    const findEntity = (domain, key, fallbackPrefix = prefix) => {
+      // 1. Direct match with prefix
+      const direct = domain + "." + fallbackPrefix + "_" + key;
+      if (states[direct]) return direct;
+
+      // 2. Token match where all device tokens exist in entity id and entity ends with _key
+      const regex = new RegExp("(?:^|[^a-z0-9])" + key + "$");
+      const candidates = allEntityIds.filter(id => {
+        if (!id.startsWith(domain + ".")) return false;
+        if (!regex.test(id)) return false;
+        // Avoid zone_1_x1 matching exclusion_zone_1_x1 unless key explicitly contains exclusion
+        if (key.startsWith("zone_") && id.includes("exclusion_" + key)) return false;
+        return tokens.every(tok => id.includes(tok));
+      });
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.length - b.length);
+        return candidates[0];
+      }
+
+      // 3. Fallback search: first token match
+      if (tokens.length > 0) {
+        const sigToken = tokens[0];
+        const partial = allEntityIds.find(id => {
+          if (!id.startsWith(domain + ".")) return false;
+          if (!regex.test(id)) return false;
+          if (key.startsWith("zone_") && id.includes("exclusion_" + key)) return false;
+          return id.includes(sigToken);
+        });
+        if (partial) return partial;
+      }
+
+      return direct;
+    };
+
+    return {
+      prefix: prefix,
+      // Target Tracking
+      target1_x: findEntity("sensor", "target_1_x"),
+      target1_y: findEntity("sensor", "target_1_y"),
+      target1_speed: findEntity("sensor", "target_1_speed"),
+      target1_angle: findEntity("sensor", "target_1_angle"),
+      target1_distance: findEntity("sensor", "target_1_distance"),
+      target1_resolution: findEntity("sensor", "target_1_resolution"),
+
+      target2_x: findEntity("sensor", "target_2_x"),
+      target2_y: findEntity("sensor", "target_2_y"),
+      target2_speed: findEntity("sensor", "target_2_speed"),
+      target2_angle: findEntity("sensor", "target_2_angle"),
+      target2_distance: findEntity("sensor", "target_2_distance"),
+      target2_resolution: findEntity("sensor", "target_2_resolution"),
+
+      target3_x: findEntity("sensor", "target_3_x"),
+      target3_y: findEntity("sensor", "target_3_y"),
+      target3_speed: findEntity("sensor", "target_3_speed"),
+      target3_angle: findEntity("sensor", "target_3_angle"),
+      target3_distance: findEntity("sensor", "target_3_distance"),
+      target3_resolution: findEntity("sensor", "target_3_resolution"),
+
+      target_count: findEntity("sensor", "target_count") || findEntity("sensor", "active_target_count"),
+      occupancy: findEntity("binary_sensor", "occupancy") || findEntity("binary_sensor", "room_occupancy"),
+      moving_target: findEntity("binary_sensor", "moving_target"),
+      still_target: findEntity("binary_sensor", "still_target"),
+      wifi_signal: findEntity("sensor", "wi_fi_signal"),
+      uptime: findEntity("sensor", "uptime"),
+
+      // Stationary latch / memory
+      stationary_memory_active: findEntity("binary_sensor", "stationary_memory_active"),
+      stationary_memory_switch: findEntity("switch", "stationary_presence_memory"),
+      stationary_latch_timeout: findEntity("number", "stationary_latch_timeout"),
+
+      // Room Boundaries & Sensor Placement
+      mounting_angle: findEntity("number", "sensor_mounting_angle"),
+      room_min_x: findEntity("number", "room_boundary_min_x"),
+      room_max_x: findEntity("number", "room_boundary_max_x"),
+      room_min_y: findEntity("number", "room_boundary_min_y"),
+      room_max_y: findEntity("number", "room_boundary_max_y"),
+      room_width: findEntity("number", "room_width"),
+      room_depth: findEntity("number", "room_depth"),
+      sensor_wall_offset_x: findEntity("number", "sensor_wall_offset_x"),
+      apply_room_dimensions_btn: findEntity("button", "apply_room_dimensions_to_boundary"),
+
+      // Zone Calibration Wizard & Entities
+      zone_select: findEntity("select", "zone_to_calibrate"),
+      zone_status: findEntity("sensor", "zone_calibration_status"),
+      live_target_pos: findEntity("sensor", "live_target_position"),
+      btn_corner_1: findEntity("button", "set_zone_corner_1"),
+      btn_corner_2: findEntity("button", "set_zone_corner_2"),
+      btn_clear_zone: findEntity("button", "clear_selected_zone"),
+      calibration_padding: findEntity("number", "calibration_padding"),
+
+      // Zones 1 - 4
+      zone1_occupancy: findEntity("binary_sensor", "zone_1_occupancy"),
+      zone1_target_count: findEntity("sensor", "zone_1_target_count"),
+      zone1_memory_active: findEntity("binary_sensor", "zone_1_memory_active"),
+      zone1_x1: findEntity("number", "zone_1_x1"),
+      zone1_y1: findEntity("number", "zone_1_y1"),
+      zone1_x2: findEntity("number", "zone_1_x2"),
+      zone1_y2: findEntity("number", "zone_1_y2"),
+      zone1_angle: findEntity("number", "zone_1_angle"),
+
+      zone2_occupancy: findEntity("binary_sensor", "zone_2_occupancy"),
+      zone2_target_count: findEntity("sensor", "zone_2_target_count"),
+      zone2_memory_active: findEntity("binary_sensor", "zone_2_memory_active"),
+      zone2_x1: findEntity("number", "zone_2_x1"),
+      zone2_y1: findEntity("number", "zone_2_y1"),
+      zone2_x2: findEntity("number", "zone_2_x2"),
+      zone2_y2: findEntity("number", "zone_2_y2"),
+      zone2_angle: findEntity("number", "zone_2_angle"),
+
+      zone3_occupancy: findEntity("binary_sensor", "zone_3_occupancy"),
+      zone3_target_count: findEntity("sensor", "zone_3_target_count"),
+      zone3_memory_active: findEntity("binary_sensor", "zone_3_memory_active"),
+      zone3_x1: findEntity("number", "zone_3_x1"),
+      zone3_y1: findEntity("number", "zone_3_y1"),
+      zone3_x2: findEntity("number", "zone_3_x2"),
+      zone3_y2: findEntity("number", "zone_3_y2"),
+      zone3_angle: findEntity("number", "zone_3_angle"),
+
+      zone4_occupancy: findEntity("binary_sensor", "zone_4_occupancy"),
+      zone4_target_count: findEntity("sensor", "zone_4_target_count"),
+      zone4_memory_active: findEntity("binary_sensor", "zone_4_memory_active"),
+      zone4_x1: findEntity("number", "zone_4_x1"),
+      zone4_y1: findEntity("number", "zone_4_y1"),
+      zone4_x2: findEntity("number", "zone_4_x2"),
+      zone4_y2: findEntity("number", "zone_4_y2"),
+      zone4_angle: findEntity("number", "zone_4_angle"),
+
+      // Hardware Exclusion Masks (1 - 3)
+      exclusion_mode: findEntity("select", "hardware_exclusion_mode"),
+      mask1_x1: findEntity("number", "exclusion_zone_1_x1"),
+      mask1_y1: findEntity("number", "exclusion_zone_1_y1"),
+      mask1_x2: findEntity("number", "exclusion_zone_1_x2"),
+      mask1_y2: findEntity("number", "exclusion_zone_1_y2"),
+      mask2_x1: findEntity("number", "exclusion_zone_2_x1"),
+      mask2_y1: findEntity("number", "exclusion_zone_2_y1"),
+      mask2_x2: findEntity("number", "exclusion_zone_2_x2"),
+      mask2_y2: findEntity("number", "exclusion_zone_2_y2"),
+      mask3_x1: findEntity("number", "exclusion_zone_3_x1"),
+      mask3_y1: findEntity("number", "exclusion_zone_3_y1"),
+      mask3_x2: findEntity("number", "exclusion_zone_3_x2"),
+      mask3_y2: findEntity("number", "exclusion_zone_3_y2"),
+
+      // Engine Tuning & Sensitivity
+      presence_timeout: findEntity("number", "presence_timeout"),
+      zone_off_delay: findEntity("number", "zone_off_delay"),
+      max_distance: findEntity("number", "max_distance"),
+      exit_trajectory_margin: findEntity("number", "exit_trajectory_margin"),
+      multi_target: findEntity("switch", "multi_target_tracking"),
+      restart_esp: findEntity("button", "restart_esp32"),
+      restart_radar: findEntity("button", "restart_radar"),
+      factory_reset_radar: findEntity("button", "factory_reset_radar")
+    };
+  }
+}
+
+// ====================================================================
+// ROOM GEOMETRY ENGINE: True Wall Coordinates & Angular Transforms
+// ====================================================================
+class RoomGeometry {
+  static compute(config, resolvedEntities, hass) {
+    const states = (hass && hass.states) || {};
+    const getVal = (id, def) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return isNaN(v) ? def : v;
+    };
+
+    // Priority 1: Sensor ESPHome entities (configured on ESP32)
+    let roomWidth = 0;
+    let roomDepth = 0;
+    let sensorOffsetX = 0;
+    let mountingAngle = 0;
+
+    if (resolvedEntities.room_width && states[resolvedEntities.room_width]) {
+      roomWidth = getVal(resolvedEntities.room_width, 0);
+    }
+    if (resolvedEntities.room_depth && states[resolvedEntities.room_depth]) {
+      roomDepth = getVal(resolvedEntities.room_depth, 0);
+    }
+    if (resolvedEntities.sensor_wall_offset_x && states[resolvedEntities.sensor_wall_offset_x]) {
+      sensorOffsetX = getVal(resolvedEntities.sensor_wall_offset_x, 0);
+    }
+    if (resolvedEntities.mounting_angle && states[resolvedEntities.mounting_angle]) {
+      mountingAngle = getVal(resolvedEntities.mounting_angle, 0);
+    }
+
+    // Priority 2: Fallback from radar boundaries min_x/max_x/max_y
+    if (!roomWidth || !roomDepth) {
+      const minX = getVal(resolvedEntities.room_min_x, -2500);
+      const maxX = getVal(resolvedEntities.room_max_x, 2500);
+      const maxY = getVal(resolvedEntities.room_max_y, 5000);
+      if (!roomWidth) roomWidth = Math.abs(maxX - minX) || 5000;
+      if (!roomDepth) roomDepth = maxY || 5000;
+    }
+
+    // Priority 3: Optional YAML config overrides if explicitly specified
+    if (config && config.room_width) roomWidth = parseFloat(config.room_width);
+    if (config && config.room_depth) roomDepth = parseFloat(config.room_depth);
+    if (config && config.sensor_offset_x !== undefined) sensorOffsetX = parseFloat(config.sensor_offset_x);
+    if (config && config.mounting_angle !== undefined) mountingAngle = parseFloat(config.mounting_angle);
+
+    // Compute Sensor Wall Coordinate (sx, sy) relative to room
+    let sx = roomWidth / 2 + sensorOffsetX;
+    let sy = 0; // Front wall (Y = 0)
+
+    return {
+      hasRoom: true,
+      roomWidth: Math.max(1000, roomWidth),
+      roomDepth: Math.max(1000, roomDepth),
+      sx: Math.max(0, Math.min(roomWidth, sx)),
+      sy: sy,
+      angle: mountingAngle,
+      sensorOffsetX: sensorOffsetX
+    };
+  }
+
+  static transformPoint(xr_mm, yr_mm, geom, invertX = false, invertY = false) {
+    let xr = xr_mm;
+    let yr = yr_mm;
+    if (invertX) xr = -xr;
+    if (invertY) yr = -yr;
+
+    if (!geom) {
+      return { x: xr, y: yr };
+    }
+
+    // Matches ESPHome rotate_point formula:
+    // tx = xr * cos(rad) - yr * sin(rad)
+    // ty = xr * sin(rad) + yr * cos(rad)
+    const rad = (((geom.angle || 0)) * Math.PI) / 180.0;
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+
+    const tx = xr * cosA - yr * sinA;
+    const ty = xr * sinA + yr * cosA;
+
+    return {
+      x: geom.sx + tx,
+      y: geom.sy + ty
+    };
+  }
+
+  static transformZonePolygon(xr1, yr1, xr2, yr2, zAngle = 0, geom) {
+    if (!geom) return [];
+    const minX = Math.min(xr1, xr2);
+    const maxX = Math.max(xr1, xr2);
+    const minY = Math.min(yr1, yr2);
+    const maxY = Math.max(yr1, yr2);
+
+    let corners = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY }
+    ];
+
+    if (zAngle !== 0) {
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const zRad = (zAngle * Math.PI) / 180.0;
+      const cosZ = Math.cos(zRad);
+      const sinZ = Math.sin(zRad);
+
+      corners = corners.map(c => {
+        const dx = c.x - cx;
+        const dy = c.y - cy;
+        return {
+          x: cx + dx * cosZ - dy * sinZ,
+          y: cy + dx * sinZ + dy * cosZ
+        };
+      });
+    }
+
+    // Transform zone corners relative to the sensor (translating and rotating with mount_yaw)
+    return corners.map(c => this.transformPoint(c.x, c.y, geom));
+  }
+
+  static transformPolygon(xr1, yr1, xr2, yr2, zAngle = 0, geom, invertX = false, invertY = false) {
+    return this.transformZonePolygon(xr1, yr1, xr2, yr2, zAngle, geom);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.RadarEntityResolver = RadarEntityResolver;
+  window.RoomGeometry = RoomGeometry;
+}
+
+
+
+// ====================================================================
+// GUI EDITOR: RADAR MAP CARD EDITOR (Single-Render, Focus Preserving)
+// ====================================================================
+class RadarMapCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = Object.assign({}, config);
+    if (!this._rendered) {
+      this._render();
+    } else {
+      this._updateFormValues();
+    }
+  }
+
+  set hass(hass) {
+    const oldHass = this._hass;
+    this._hass = hass;
+    if (!this._rendered) {
+      this._render();
+    } else if (!oldHass) {
+      this._updateDeviceOptions();
+    }
+  }
+
+  _render() {
+    if (!this._config) return;
+    this._rendered = true;
+
+    this.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:14px; padding:8px 0; font-family:var(--ha-font-family, sans-serif);">
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Select Presence Sensor</label>
+          <select id="editorDeviceSelect" style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2);">
+            <option value="">Select on drop-down</option>
+          </select>
+          <div style="font-size:0.75rem; color:var(--secondary-text-color, #94a3b8); margin-top:4px;">
+            Choose a specific room to pin this card, or keep "Select on drop-down" to switch sensors directly from the card header.
+          </div>
+        </div>
+
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Card Title</label>
+          <input type="text" id="editorTitleInput" value="${this._config.title || "Presence Radar Map"}"
+                 style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); box-sizing:border-box;" />
+        </div>
+
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Card Layout</label>
+          <select id="editorLayoutSelect" style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2);">
+            <option value="full" ${this._config.layout_mode !== "minimal" ? "selected" : ""}>Full (Radar View + Targets + Zones)</option>
+            <option value="minimal" ${this._config.layout_mode === "minimal" ? "selected" : ""}>Minimal (Radar View Only)</option>
+          </select>
+        </div>
+      </div>
+    `;
+
+    this._updateDeviceOptions();
+
+    const selDevice = this.querySelector("#editorDeviceSelect");
+    const inpTitle = this.querySelector("#editorTitleInput");
+    const selLayout = this.querySelector("#editorLayoutSelect");
+
+    const notify = () => {
+      const newConfig = Object.assign({}, this._config, {
+        device: selDevice.value,
+        title: inpTitle.value,
+        layout_mode: selLayout.value
+      });
+      this._config = newConfig;
+      this.dispatchEvent(new CustomEvent("config-changed", {
+        detail: { config: newConfig },
+        bubbles: true,
+        composed: true
+      }));
+    };
+
+    selDevice.addEventListener("change", notify);
+    inpTitle.addEventListener("input", notify);
+    selLayout.addEventListener("change", notify);
+  }
+
+  _updateDeviceOptions() {
+    if (!this._hass) return;
+    const sel = this.querySelector("#editorDeviceSelect");
+    if (!sel) return;
+
+    const devices = RadarEntityResolver.getDevices(this._hass);
+    const curVal = (this._config && this._config.device) || "";
+
+    sel.innerHTML = `
+      <option value="">Select on drop-down</option>
+      ${devices.map(d => `<option value="${d.prefix}" ${curVal === d.prefix ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("")}
+    `;
+    sel.value = curVal;
+  }
+
+  _updateFormValues() {
+    if (!this._config) return;
+    const inpTitle = this.querySelector("#editorTitleInput");
+    if (inpTitle && document.activeElement !== inpTitle) {
+      inpTitle.value = this._config.title || "Presence Radar Map";
+    }
+    const selDevice = this.querySelector("#editorDeviceSelect");
+    if (selDevice && document.activeElement !== selDevice) {
+      selDevice.value = this._config.device || "";
+    }
+    const selLayout = this.querySelector("#editorLayoutSelect");
+    if (selLayout && document.activeElement !== selLayout) {
+      selLayout.value = this._config.layout_mode || "full";
+    }
+  }
+}
+
+// ====================================================================
+// CARD 1: RADAR MAP CARD (<radar-map-card>)
+// ====================================================================
+class RadarMapCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._trails = { 1: [], 2: [], 3: [] };
+    this._selectedDevice = "";
+    this._syncHandler = null;
+  }
+
+  static getConfigElement() {
+    return document.createElement("radar-map-card-editor");
+  }
+
+  static getStubConfig() {
+    return {
+      title: "Presence Radar Map",
+      device: "",
+      layout_mode: "full"
+    };
+  }
+
+  setConfig(config) {
+    this._config = Object.assign({
+      title: "Presence Radar Map",
+      device: "",
+      layout_mode: "full"
+    }, config);
+
+    if (this._config.device) {
+      this._selectedDevice = this._config.device;
+    }
+
+    if (this._rendered) {
+      this._render();
+      this._update();
+    }
+  }
+
+  connectedCallback() {
+    this._syncHandler = (e) => {
+      // Only follow external sync if this card is set to "Select on drop-down" (not pinned)
+      if (!this._config.device && e.detail && e.detail.device && e.detail.device !== this._selectedDevice) {
+        this._selectedDevice = e.detail.device;
+        if (this._hass) {
+          this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+          this._render();
+          this._update();
+        }
+      }
+    };
+    window.addEventListener("radar-device-selected", this._syncHandler);
+  }
+
+  disconnectedCallback() {
+    if (this._syncHandler) {
+      window.removeEventListener("radar-device-selected", this._syncHandler);
+      this._syncHandler = null;
+    }
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+
+    if (!this._selectedDevice) {
+      if (this._config && this._config.device) {
+        this._selectedDevice = this._config.device;
+      } else {
+        const devs = RadarEntityResolver.getDevices(hass);
+        if (devs.length > 0) {
+          this._selectedDevice = devs[0].prefix;
+        }
+      }
+    }
+
+    if (!this._rendered) {
+      this._entities = RadarEntityResolver.resolve(hass, { device: this._selectedDevice });
+      this._render();
+      this._rendered = true;
+    }
+
+    this._update();
+  }
+
+  _render() {
+    const devices = RadarEntityResolver.getDevices(this._hass);
+    const hasPinnedDevice = Boolean(this._config && this._config.device);
+    const isMinimal = this._config && this._config.layout_mode === "minimal";
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+          --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
+          --primary-color: #38bdf8;
+          --accent-color: #0284c7;
+          --occupied-color: #10b981;
+          --text-color: var(--primary-text-color, #f8fafc);
+          --text-muted: var(--secondary-text-color, #94a3b8);
+          --border-color: rgba(255, 255, 255, 0.1);
+        }
+        ha-card {
+          background: var(--card-bg);
+          border-radius: 16px;
+          border: 1px solid var(--border-color);
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+          overflow: hidden;
+          padding: 16px;
+          color: var(--text-color);
+        }
+        .header {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+        .header-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .title-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .card-icon {
+          width: 24px;
+          height: 24px;
+          fill: var(--primary-color);
+        }
+        .card-title {
+          font-size: 1.15rem;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+        }
+        .device-selector-wrapper {
+          flex: 1;
+          max-width: 260px;
+        }
+        .device-select {
+          width: 100%;
+          padding: 6px 10px;
+          border-radius: 8px;
+          background: rgba(255, 255, 255, 0.07);
+          color: var(--text-color);
+          border: 1px solid var(--border-color);
+          font-size: 0.85rem;
+          font-weight: 600;
+          cursor: pointer;
+          outline: none;
+        }
+        .device-select:focus {
+          border-color: var(--primary-color);
+        }
+        .chips-bar {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          border-radius: 20px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--border-color);
+        }
+        .chip.occupied {
+          background: rgba(16, 185, 129, 0.15);
+          border-color: rgba(16, 185, 129, 0.4);
+          color: #34d399;
+        }
+        .chip.latched {
+          background: rgba(168, 85, 247, 0.15);
+          border-color: rgba(168, 85, 247, 0.4);
+          color: #c084fc;
+        }
+        .map-viewport {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 4 / 3;
+          background: radial-gradient(circle at 50% 10%, #1e293b 0%, #0f172a 80%);
+          border-radius: 12px;
+          border: 1px solid var(--border-color);
+          overflow: hidden;
+        }
+        svg {
+          width: 100%;
+          height: 100%;
+          display: block;
+        }
+        .details-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+          gap: 8px;
+          margin-top: 14px;
+        }
+        .detail-card {
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          padding: 8px 10px;
+        }
+        .detail-title {
+          font-size: 0.7rem;
+          color: var(--text-muted);
+          text-transform: uppercase;
+          font-weight: 700;
+        }
+        .detail-val {
+          font-size: 0.95rem;
+          font-weight: 700;
+          margin-top: 2px;
+          color: var(--text-color);
+        }
+        .zones-row {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .zone-pill {
+          padding: 6px 8px;
+          border-radius: 6px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-color);
+          text-align: center;
+          font-size: 0.72rem;
+          font-weight: 600;
+        }
+        .zone-pill.active {
+          background: rgba(56, 189, 248, 0.15);
+          border-color: rgba(56, 189, 248, 0.4);
+          color: #38bdf8;
+        }
+        .zone-pill.occupied {
+          background: rgba(16, 185, 129, 0.2);
+          border-color: rgba(16, 185, 129, 0.6);
+          color: #34d399;
+          font-weight: 700;
+        }
+      </style>
+
+      <ha-card>
+        <div class="header">
+          <div class="header-top">
+            <div class="title-wrapper">
+              <svg class="card-icon" viewBox="0 0 24 24">
+                <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+              </svg>
+              <div class="card-title">${this._config.title || "Presence Radar Map"}</div>
+            </div>
+            <div class="device-selector-wrapper" style="${hasPinnedDevice ? "display: none;" : ""}">
+              <select id="mapDeviceSelect" class="device-select">
+                ${devices.map(d => `<option value="${d.prefix}" ${this._selectedDevice === d.prefix ? "selected" : ""}>${d.name}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+
+          <div class="chips-bar" id="chipsBar">
+            <div class="chip" id="chipOccupancy">⚪ Clear</div>
+            <div class="chip" id="chipTargets">🎯 0 Targets</div>
+            <div class="chip" id="chipLatched" style="display:none;">🧠 Latched</div>
+            <div class="chip" id="chipWifi">📶 -- dBm</div>
+          </div>
+        </div>
+
+        <div class="map-viewport">
+          <svg id="radarSvg" viewBox="-3000 -500 6000 6500" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <radialGradient id="beamGradient" cx="50%" cy="0%" r="100%">
+                <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3" />
+                <stop offset="60%" stop-color="#0284c7" stop-opacity="0.08" />
+                <stop offset="100%" stop-color="#0284c7" stop-opacity="0" />
+              </radialGradient>
+              <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="30" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              <clipPath id="radarRoomClip">
+                <rect id="radarRoomClipRect" x="0" y="0" width="4000" height="5000" rx="6" />
+              </clipPath>
+            </defs>
+
+            <!-- Room Boundaries & Walls -->
+            <g id="roomLayer"></g>
+
+            <!-- Detection Zones -->
+            <g id="zonesLayer"></g>
+
+            <!-- Exclusion Masks -->
+            <g id="masksLayer"></g>
+
+            <!-- Radar Beam Cone -->
+            <path id="beamCone" fill="url(#beamGradient)" opacity="0.8" />
+
+            <!-- Motion Trails -->
+            <g id="trailsLayer"></g>
+
+            <!-- Active Targets -->
+            <g id="targetsLayer"></g>
+
+            <!-- Sensor Mount Icon -->
+            <g id="sensorIconLayer"></g>
+          </svg>
+        </div>
+
+        <div class="details-grid" id="targetsDetailsGrid" style="${isMinimal ? "display: none;" : ""}">
+          <div class="detail-card"><div class="detail-title">Target 1</div><div class="detail-val" id="valT1">Inactive</div></div>
+          <div class="detail-card"><div class="detail-title">Target 2</div><div class="detail-val" id="valT2">Inactive</div></div>
+          <div class="detail-card"><div class="detail-title">Target 3</div><div class="detail-val" id="valT3">Inactive</div></div>
+        </div>
+
+        <div class="zones-row" id="zonesRow" style="${isMinimal ? "display: none;" : ""}">
+          <div class="zone-pill" id="pillZ1">Zone 1</div>
+          <div class="zone-pill" id="pillZ2">Zone 2</div>
+          <div class="zone-pill" id="pillZ3">Zone 3</div>
+          <div class="zone-pill" id="pillZ4">Zone 4</div>
+        </div>
+      </ha-card>
+    `;
+
+    const selectEl = this.shadowRoot.getElementById("mapDeviceSelect");
+    if (selectEl) {
+      selectEl.addEventListener("change", (e) => {
+        this._selectedDevice = e.target.value;
+        this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+        window.dispatchEvent(new CustomEvent("radar-device-selected", {
+          detail: { device: this._selectedDevice }
+        }));
+        this._update();
+      });
+    }
+  }
+
+  _update() {
+    if (!this._hass || !this.shadowRoot) return;
+    if (!this._entities) {
+      this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+    }
+
+    const ent = this._entities;
+    const states = this._hass.states;
+
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return isNaN(v) ? def : v;
+    };
+    const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+
+    // Header Chips
+    const occ = getState(ent.occupancy, "off") === "on";
+    const chipOcc = this.shadowRoot.getElementById("chipOccupancy");
+    if (chipOcc) {
+      chipOcc.className = "chip " + (occ ? "occupied" : "");
+      chipOcc.textContent = occ ? "🟢 Occupied" : "⚪ Clear";
+    }
+
+    const tc = getVal(ent.target_count, 0);
+    const chipTc = this.shadowRoot.getElementById("chipTargets");
+    if (chipTc) {
+      chipTc.textContent = `🎯 ${tc} Target${tc === 1 ? "" : "s"}`;
+    }
+
+    const latched = getState(ent.stationary_memory_active, "off") === "on";
+    const chipLatch = this.shadowRoot.getElementById("chipLatched");
+    if (chipLatch) {
+      chipLatch.style.display = latched ? "inline-flex" : "none";
+      chipLatch.className = "chip latched";
+    }
+
+    const wifi = states[ent.wifi_signal] ? states[ent.wifi_signal].state : "--";
+    const chipWifi = this.shadowRoot.getElementById("chipWifi");
+    if (chipWifi) {
+      chipWifi.textContent = `📶 ${wifi} dBm`;
+    }
+
+    // Geometry Calculation directly from ESP32 Sensor
+    const geom = RoomGeometry.compute(this._config, ent, this._hass);
+
+    // Update SVG ViewBox and Room Clip based on room dimensions
+    const svg = this.shadowRoot.getElementById("radarSvg");
+    if (svg) {
+      const margin = 500;
+      svg.setAttribute("viewBox", `${-margin} ${-margin} ${geom.roomWidth + margin * 2} ${geom.roomDepth + margin * 2}`);
+      const clipRect = this.shadowRoot.getElementById("radarRoomClipRect");
+      if (clipRect) {
+        clipRect.setAttribute("width", geom.roomWidth);
+        clipRect.setAttribute("height", geom.roomDepth);
+      }
+    }
+
+    // Render Room Walls
+    const roomLayer = this.shadowRoot.getElementById("roomLayer");
+    if (roomLayer) {
+      roomLayer.innerHTML = `
+        <!-- Outer Architectural Wall -->
+        <rect x="0" y="0" width="${geom.roomWidth}" height="${geom.roomDepth}"
+              fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="8" rx="6" />
+        <!-- Dimension Labels -->
+        <text x="${geom.roomWidth / 2}" y="-120" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle">
+          ${Math.round(geom.roomWidth)} mm
+        </text>
+        <text x="-120" y="${geom.roomDepth / 2}" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle"
+              transform="rotate(-90, -120, ${geom.roomDepth / 2})">
+          ${Math.round(geom.roomDepth)} mm
+        </text>
+      `;
+    }
+
+    // Render Sensor Icon & Angled Beam Cone
+    const sensorIconLayer = this.shadowRoot.getElementById("sensorIconLayer");
+    const beamCone = this.shadowRoot.getElementById("beamCone");
+    if (sensorIconLayer && beamCone) {
+      const sx = geom.sx;
+      const sy = 0;
+      sensorIconLayer.innerHTML = `
+        <circle cx="${sx}" cy="${sy}" r="120" fill="#0284c7" stroke="#38bdf8" stroke-width="12" />
+        <circle cx="${sx}" cy="${sy}" r="40" fill="#fff" />
+      `;
+
+      const beamDist = Math.max(geom.roomWidth, geom.roomDepth) * 1.3;
+      const radCenter = (((geom.angle || 0) + 90) * Math.PI) / 180;
+      const fovRad = (60 * Math.PI) / 180;
+      const leftAngle = radCenter - fovRad;
+      const rightAngle = radCenter + fovRad;
+
+      const lx = sx + beamDist * Math.cos(leftAngle);
+      const ly = sy + beamDist * Math.sin(leftAngle);
+      const rx = sx + beamDist * Math.cos(rightAngle);
+      const ry = sy + beamDist * Math.sin(rightAngle);
+
+      beamCone.setAttribute("d", `M ${sx} ${sy} L ${lx} ${ly} A ${beamDist} ${beamDist} 0 0 1 ${rx} ${ry} Z`);
+    }
+
+    // Render Zones
+    const zonesLayer = this.shadowRoot.getElementById("zonesLayer");
+    if (zonesLayer) {
+      let zonesHtml = "";
+      for (let z = 1; z <= 4; z++) {
+        const x1 = getVal(ent[`zone${z}_x1`]);
+        const y1 = getVal(ent[`zone${z}_y1`]);
+        const x2 = getVal(ent[`zone${z}_x2`]);
+        const y2 = getVal(ent[`zone${z}_y2`]);
+        const zAngle = getVal(ent[`zone${z}_angle`], 0);
+        const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
+
+        const pill = this.shadowRoot.getElementById(`pillZ${z}`);
+        if (pill) {
+          const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
+          pill.className = "zone-pill " + (isConfigured ? (zOcc ? "occupied" : "active") : "");
+          pill.textContent = `Zone ${z}${zOcc ? " (OCC)" : ""}`;
+        }
+
+        if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
+          const corners = RoomGeometry.transformZonePolygon(x1, y1, x2, y2, zAngle, geom);
+          const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+          const stroke = zOcc ? "#10b981" : "#38bdf8";
+          const fill = zOcc ? "rgba(16, 185, 129, 0.25)" : "rgba(56, 189, 248, 0.1)";
+
+          zonesHtml += `
+            <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="${zOcc ? "none" : "30,15"}" />
+            <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                  font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+              Zone ${z}${zOcc ? " 👤" : ""}
+            </text>
+          `;
+        }
+      }
+      zonesLayer.innerHTML = zonesHtml;
+    }
+
+    // Render Targets & Motion Trails
+    const targetsLayer = this.shadowRoot.getElementById("targetsLayer");
+    const trailsLayer = this.shadowRoot.getElementById("trailsLayer");
+    let targetsHtml = "";
+    let trailsHtml = "";
+
+    for (let t = 1; t <= 3; t++) {
+      const tx = getVal(ent[`target${t}_x`]);
+      const ty = getVal(ent[`target${t}_y`]);
+      const speed = getVal(ent[`target${t}_speed`]);
+      const dist = getVal(ent[`target${t}_distance`]);
+      const elVal = this.shadowRoot.getElementById(`valT${t}`);
+
+      if (ty > 0) {
+        const pt = RoomGeometry.transformPoint(tx, ty, geom);
+        
+        // Update Trail
+        this._trails[t].push(pt);
+        if (this._trails[t].length > 12) this._trails[t].shift();
+
+        // Trail path
+        if (this._trails[t].length > 1) {
+          const dStr = this._trails[t].map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+          trailsHtml += `<path d="${dStr}" fill="none" stroke="#38bdf8" stroke-width="8" opacity="0.4" stroke-dasharray="15,10" />`;
+        }
+
+        // Target Dot
+        const targetColor = t === 1 ? "#38bdf8" : (t === 2 ? "#a855f7" : "#f59e0b");
+        targetsHtml += `
+          <circle cx="${pt.x}" cy="${pt.y}" r="140" fill="${targetColor}" opacity="0.3" filter="url(#glow)" />
+          <circle cx="${pt.x}" cy="${pt.y}" r="80" fill="${targetColor}" stroke="#fff" stroke-width="16" />
+          <text x="${pt.x}" y="${pt.y - 120}" fill="#fff" font-size="130" font-weight="800" text-anchor="middle">
+            T${t} (${Math.round(dist)}mm)
+          </text>
+        `;
+
+        if (elVal) {
+          elVal.textContent = `X:${Math.round(tx)} Y:${Math.round(ty)} (${Math.round(speed)}cm/s)`;
+          elVal.style.color = targetColor;
+        }
+      } else {
+        this._trails[t] = [];
+        if (elVal) {
+          elVal.textContent = "Inactive";
+          elVal.style.color = "var(--text-muted)";
+        }
+      }
+    }
+
+    if (targetsLayer) targetsLayer.innerHTML = targetsHtml;
+    if (trailsLayer) trailsLayer.innerHTML = trailsHtml;
+  }
+}
+
+
+
+// ====================================================================
+// GUI EDITOR: RADAR CALIBRATION CARD EDITOR (Single-Render, Focus Preserving)
+// ====================================================================
+class RadarCalibrationCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = Object.assign({}, config);
+    if (!this._rendered) {
+      this._render();
+    } else {
+      this._updateFormValues();
+    }
+  }
+
+  set hass(hass) {
+    const oldHass = this._hass;
+    this._hass = hass;
+    if (!this._rendered) {
+      this._render();
+    } else if (!oldHass) {
+      this._updateDeviceOptions();
+    }
+  }
+
+  _render() {
+    if (!this._config) return;
+    this._rendered = true;
+
+    this.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:14px; padding:8px 0; font-family:var(--ha-font-family, sans-serif);">
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Select Presence Sensor</label>
+          <select id="editorCalDeviceSelect" style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2);">
+            <option value="">Select on drop-down</option>
+          </select>
+          <div style="font-size:0.75rem; color:var(--secondary-text-color, #94a3b8); margin-top:4px;">
+            Choose a specific room to pin this card, or keep "Select on drop-down" to switch sensors directly from the card header.
+          </div>
+        </div>
+
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:5px;">Card Title</label>
+          <input type="text" id="editorCalTitleInput" value="${this._config.title || "Presence Onboarding & Calibration Suite"}"
+                 style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); box-sizing:border-box;" />
+        </div>
+      </div>
+    `;
+
+    this._updateDeviceOptions();
+
+    const selDevice = this.querySelector("#editorCalDeviceSelect");
+    const inpTitle = this.querySelector("#editorCalTitleInput");
+
+    const notify = () => {
+      const newConfig = Object.assign({}, this._config, {
+        device: selDevice.value,
+        title: inpTitle.value
+      });
+      this._config = newConfig;
+      this.dispatchEvent(new CustomEvent("config-changed", {
+        detail: { config: newConfig },
+        bubbles: true,
+        composed: true
+      }));
+    };
+
+    selDevice.addEventListener("change", notify);
+    inpTitle.addEventListener("input", notify);
+  }
+
+  _updateDeviceOptions() {
+    if (!this._hass) return;
+    const sel = this.querySelector("#editorCalDeviceSelect");
+    if (!sel) return;
+
+    const devices = RadarEntityResolver.getDevices(this._hass);
+    const curVal = (this._config && this._config.device) || "";
+
+    sel.innerHTML = `
+      <option value="">Select on drop-down</option>
+      ${devices.map(d => `<option value="${d.prefix}" ${curVal === d.prefix ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("")}
+    `;
+    sel.value = curVal;
+  }
+
+  _updateFormValues() {
+    if (!this._config) return;
+    const inpTitle = this.querySelector("#editorCalTitleInput");
+    if (inpTitle && document.activeElement !== inpTitle) {
+      inpTitle.value = this._config.title || "Presence Onboarding & Calibration Suite";
+    }
+    const selDevice = this.querySelector("#editorCalDeviceSelect");
+    if (selDevice && document.activeElement !== selDevice) {
+      selDevice.value = this._config.device || "";
+    }
+  }
+}
+
+// ====================================================================
+// CARD 2: RADAR CALIBRATION CARD (<radar-calibration-card>)
+// ====================================================================
+class RadarCalibrationCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._selectedDevice = "";
+    this._activeTab = "placement";
+    this._selectedZone = 1;
+    this._toastMsg = "";
+    this._toastTimeout = null;
+    this._syncHandler = null;
+    this._formState = {
+      device: "",
+      preset: "center",
+      roomWidth: 4000,
+      roomDepth: 5000,
+      sensorOffsetX: 0,
+      mountingYaw: 0
+    };
+  }
+
+  static getConfigElement() {
+    return document.createElement("radar-calibration-card-editor");
+  }
+
+  static getStubConfig() {
+    return {
+      title: "Presence Onboarding & Calibration Suite",
+      device: ""
+    };
+  }
+
+  setConfig(config) {
+    this._config = Object.assign({
+      title: "Presence Onboarding & Calibration Suite",
+      device: ""
+    }, config);
+
+    if (this._config.device) {
+      this._selectedDevice = this._config.device;
+    }
+
+    if (this._rendered) {
+      this._renderFull();
+    }
+  }
+
+  connectedCallback() {
+    this._syncHandler = (e) => {
+      if (!this._config.device && e.detail && e.detail.device && e.detail.device !== this._selectedDevice) {
+        this._selectedDevice = e.detail.device;
+        if (this._hass) {
+          this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+          this._renderFull();
+        }
+      }
+    };
+    window.addEventListener("radar-device-selected", this._syncHandler);
+  }
+
+  disconnectedCallback() {
+    if (this._syncHandler) {
+      window.removeEventListener("radar-device-selected", this._syncHandler);
+      this._syncHandler = null;
+    }
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+
+    if (!this._selectedDevice) {
+      if (this._config && this._config.device) {
+        this._selectedDevice = this._config.device;
+      } else {
+        const devs = RadarEntityResolver.getDevices(hass);
+        if (devs.length > 0) {
+          this._selectedDevice = devs[0].prefix;
+        }
+      }
+    }
+
+    if (!this._rendered) {
+      this._entities = RadarEntityResolver.resolve(hass, { device: this._selectedDevice });
+      this._renderFull();
+      this._rendered = true;
+    } else {
+      this._updateLiveValues();
+    }
+  }
+
+  _showToast(msg) {
+    this._toastMsg = msg;
+    const toast = this.shadowRoot.getElementById("toastBanner");
+    if (toast) {
+      toast.textContent = msg;
+      toast.style.display = "block";
+      clearTimeout(this._toastTimeout);
+      this._toastTimeout = setTimeout(() => {
+        toast.style.display = "none";
+      }, 3500);
+    }
+  }
+
+  _callService(domain, service, data) {
+    if (!this._hass) return Promise.reject("No HASS instance");
+    return this._hass.callService(domain, service, data);
+  }
+
+  _setNumber(entityId, value) {
+    if (!entityId || !this._hass || !this._hass.states[entityId]) return;
+    this._callService("number", "set_value", { entity_id: entityId, value: value });
+  }
+
+  _pressButton(entityId) {
+    if (!entityId || !this._hass || !this._hass.states[entityId]) return;
+    this._callService("button", "press", { entity_id: entityId });
+  }
+
+  _setSelect(entityId, option) {
+    if (!entityId || !this._hass || !this._hass.states[entityId]) return;
+    this._callService("select", "select_option", { entity_id: entityId, option: option });
+  }
+
+  _toggleSwitch(entityId) {
+    if (!entityId || !this._hass || !this._hass.states[entityId]) return;
+    this._callService("switch", "toggle", { entity_id: entityId });
+  }
+
+  _initFormStateFromEntities() {
+    if (!this._entities || !this._hass) return;
+    const ent = this._entities;
+    const states = this._hass.states;
+    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+
+    const rw = getVal(ent.room_width, 0) || Math.abs(getVal(ent.room_max_x, 2500) - getVal(ent.room_min_x, -2500)) || 4000;
+    const rd = getVal(ent.room_depth, 0) || getVal(ent.room_max_y, 5000) || 5000;
+    const off = getVal(ent.sensor_wall_offset_x, 0);
+    const yaw = getVal(ent.mounting_angle, 0);
+
+    let preset = "center";
+    if (Math.abs(yaw - (-45)) < 2 && off <= -Math.round(rw / 3)) preset = "corner_45_left";
+    else if (Math.abs(yaw - 45) < 2 && off >= Math.round(rw / 3)) preset = "corner_45_right";
+    else if (yaw === 0 && off <= -Math.round(rw / 3)) preset = "left_corner";
+    else if (yaw === 0 && off >= Math.round(rw / 3)) preset = "right_corner";
+    else if (yaw === 0 && off === 0) preset = "center";
+    else preset = "custom";
+
+    this._formState = {
+      device: this._selectedDevice,
+      preset: preset,
+      roomWidth: Math.round(rw),
+      roomDepth: Math.round(rd),
+      sensorOffsetX: Math.round(off),
+      mountingYaw: Math.round(yaw)
+    };
+
+    // Populate Tab 1 Inputs
+    const selPreset = this.shadowRoot.getElementById("selPlacementPreset");
+    if (selPreset) selPreset.value = preset;
+    const inpW = this.shadowRoot.getElementById("inpRoomWidth");
+    if (inpW) inpW.value = this._formState.roomWidth;
+    const inpD = this.shadowRoot.getElementById("inpRoomDepth");
+    if (inpD) inpD.value = this._formState.roomDepth;
+    const inpOff = this.shadowRoot.getElementById("inpWallOffsetX");
+    if (inpOff) inpOff.value = this._formState.sensorOffsetX;
+    const inpYaw = this.shadowRoot.getElementById("inpMountingYaw");
+    if (inpYaw) inpYaw.value = this._formState.mountingYaw;
+
+    // Populate Tab 4 Engine Inputs
+    const setInp = (id, val) => {
+      const el = this.shadowRoot.getElementById(id);
+      if (el) el.value = val;
+    };
+    setInp("inpMaxDistance", getVal(ent.max_distance, 600));
+    setInp("inpPresenceTimeout", getVal(ent.presence_timeout, 15));
+    setInp("inpZoneOffDelay", getVal(ent.zone_off_delay, 5));
+    setInp("inpStationaryTimeout", getVal(ent.stationary_latch_timeout, 30));
+    setInp("inpExitMargin", getVal(ent.exit_trajectory_margin, 200));
+
+    const chkStat = this.shadowRoot.getElementById("chkStationaryMemory");
+    if (chkStat) chkStat.checked = (ent.stationary_memory_switch && states[ent.stationary_memory_switch] && states[ent.stationary_memory_switch].state === "on");
+
+    const chkMulti = this.shadowRoot.getElementById("chkMultiTarget");
+    if (chkMulti) chkMulti.checked = (ent.multi_target && states[ent.multi_target] && states[ent.multi_target].state === "on");
+
+    // Populate Tab 3 Masks Inputs
+    for (let m = 1; m <= 3; m++) {
+      setInp(`inpMask${m}_x1`, getVal(ent[`mask${m}_x1`]));
+      setInp(`inpMask${m}_y1`, getVal(ent[`mask${m}_y1`]));
+      setInp(`inpMask${m}_x2`, getVal(ent[`mask${m}_x2`]));
+      setInp(`inpMask${m}_y2`, getVal(ent[`mask${m}_y2`]));
+    }
+  }
+
+  _renderFull() {
+    const devices = RadarEntityResolver.getDevices(this._hass);
+    const hasPinnedDevice = Boolean(this._config && this._config.device);
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+          --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
+          --primary-color: #38bdf8;
+          --primary-hover: #0284c7;
+          --occupied-color: #10b981;
+          --warning-color: #f59e0b;
+          --danger-color: #ef4444;
+          --text-color: var(--primary-text-color, #f8fafc);
+          --text-muted: var(--secondary-text-color, #94a3b8);
+          --border-color: rgba(255, 255, 255, 0.1);
+        }
+        ha-card {
+          background: var(--card-bg);
+          border-radius: 16px;
+          border: 1px solid var(--border-color);
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+          overflow: hidden;
+          padding: 16px;
+          color: var(--text-color);
+        }
+        .header {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+        .header-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+        .title-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .card-icon {
+          width: 24px;
+          height: 24px;
+          fill: var(--primary-color);
+        }
+        .card-title {
+          font-size: 1.15rem;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+        }
+        .device-selector-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex: 1;
+          max-width: 320px;
+        }
+        .device-select {
+          width: 100%;
+          padding: 8px 12px;
+          border-radius: 8px;
+          background: rgba(255, 255, 255, 0.08);
+          color: var(--text-color);
+          border: 1px solid var(--border-color);
+          font-size: 0.88rem;
+          font-weight: 600;
+          cursor: pointer;
+          outline: none;
+        }
+        .device-select:focus {
+          border-color: var(--primary-color);
+        }
+        .btn-restart {
+          padding: 7px 12px;
+          border-radius: 8px;
+          background: rgba(239, 68, 68, 0.15);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: #f87171;
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.2s;
+        }
+        .btn-restart:hover {
+          background: rgba(239, 68, 68, 0.25);
+        }
+        .chips-bar {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          border-radius: 20px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--border-color);
+        }
+        .chip.occupied {
+          background: rgba(16, 185, 129, 0.15);
+          border-color: rgba(16, 185, 129, 0.4);
+          color: #34d399;
+        }
+        .chip.latched {
+          background: rgba(168, 85, 247, 0.15);
+          border-color: rgba(168, 85, 247, 0.4);
+          color: #c084fc;
+        }
+        .tabs-nav {
+          display: flex;
+          border-bottom: 1px solid var(--border-color);
+          margin-bottom: 16px;
+          gap: 4px;
+          overflow-x: auto;
+        }
+        .tab-btn {
+          padding: 8px 14px;
+          border: none;
+          background: transparent;
+          color: var(--text-muted);
+          font-size: 0.82rem;
+          font-weight: 600;
+          cursor: pointer;
+          border-bottom: 2px solid transparent;
+          transition: all 0.2s;
+          white-space: nowrap;
+        }
+        .tab-btn:hover {
+          color: var(--text-color);
+        }
+        .tab-btn.active {
+          color: var(--primary-color);
+          border-bottom-color: var(--primary-color);
+          font-weight: 700;
+        }
+        .tab-pane {
+          display: none;
+        }
+        .tab-pane.active {
+          display: block;
+        }
+        .toast-banner {
+          display: none;
+          background: rgba(16, 185, 129, 0.2);
+          border: 1px solid rgba(16, 185, 129, 0.5);
+          color: #34d399;
+          padding: 10px 14px;
+          border-radius: 8px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          margin-bottom: 14px;
+          text-align: center;
+        }
+        .form-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .form-label {
+          font-size: 0.78rem;
+          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .form-input, .form-select {
+          box-sizing: border-box;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          padding: 8px 12px;
+          border-radius: 8px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid var(--border-color);
+          color: var(--text-color);
+          font-size: 0.88rem;
+          outline: none;
+        }
+        .form-group {
+          min-width: 0;
+          box-sizing: border-box;
+        }
+        .stepper-box {
+          min-width: 0;
+          box-sizing: border-box;
+          width: 100%;
+          max-width: 100%;
+          overflow: hidden;
+        }
+        .zones-grid {
+          min-width: 0;
+          box-sizing: border-box;
+          width: 100%;
+          max-width: 100%;
+        }
+        .zone-card {
+          min-width: 0;
+          box-sizing: border-box;
+        }
+        .form-input:focus, .form-select:focus {
+          border-color: var(--primary-color);
+        }
+        .action-row {
+          display: flex;
+          gap: 10px;
+          margin-top: 14px;
+          flex-wrap: wrap;
+        }
+        .btn-primary {
+          background: var(--primary-color);
+          color: #0f172a;
+          border: none;
+          padding: 10px 18px;
+          border-radius: 8px;
+          font-size: 0.85rem;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          transition: background 0.2s;
+        }
+        .btn-primary:hover {
+          background: var(--primary-hover);
+          color: #fff;
+        }
+        .btn-secondary {
+          background: rgba(255, 255, 255, 0.08);
+          color: var(--text-color);
+          border: 1px solid var(--border-color);
+          padding: 10px 16px;
+          border-radius: 8px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .btn-secondary:hover {
+          background: rgba(255, 255, 255, 0.12);
+        }
+        .btn-danger {
+          background: rgba(239, 68, 68, 0.15);
+          color: #f87171;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          padding: 8px 14px;
+          border-radius: 8px;
+          font-size: 0.82rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .btn-danger:hover {
+          background: rgba(239, 68, 68, 0.25);
+        }
+        .mini-viewfinder {
+          width: 100%;
+          aspect-ratio: 16 / 10;
+          background: radial-gradient(circle at 50% 10%, #1e293b 0%, #0f172a 80%);
+          border-radius: 12px;
+          border: 1px solid var(--border-color);
+          overflow: hidden;
+          margin: 12px 0;
+        }
+        .zones-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+        .zone-card {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-color);
+          border-radius: 10px;
+          padding: 12px;
+          cursor: pointer;
+          transition: border-color 0.2s, background 0.2s;
+        }
+        .zone-card:hover {
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .zone-card.selected {
+          border-color: var(--primary-color);
+          background: rgba(56, 189, 248, 0.08);
+        }
+        .zone-card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+        .zone-card-title {
+          font-size: 0.88rem;
+          font-weight: 700;
+        }
+        .zone-status-badge {
+          font-size: 0.7rem;
+          padding: 2px 8px;
+          border-radius: 10px;
+          font-weight: 600;
+          background: rgba(255, 255, 255, 0.1);
+        }
+        .zone-status-badge.occupied {
+          background: rgba(16, 185, 129, 0.2);
+          color: #34d399;
+        }
+        .zone-coords-info {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          line-height: 1.4;
+        }
+        .stepper-box {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-color);
+          border-radius: 12px;
+          padding: 16px;
+        }
+        .stepper-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        .stepper-step-pill {
+          background: var(--primary-color);
+          color: #0f172a;
+          font-size: 0.75rem;
+          font-weight: 800;
+          padding: 2px 8px;
+          border-radius: 12px;
+        }
+        .stepper-title {
+          font-size: 0.95rem;
+          font-weight: 700;
+        }
+        .stepper-instruction {
+          font-size: 0.82rem;
+          color: var(--text-muted);
+          margin-bottom: 14px;
+          line-height: 1.4;
+        }
+        .nudge-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+          gap: 8px;
+          margin: 12px 0;
+        }
+        .nudge-group {
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          padding: 8px;
+          text-align: center;
+        }
+        .nudge-label {
+          font-size: 0.72rem;
+          color: var(--text-muted);
+          margin-bottom: 6px;
+          font-weight: 600;
+        }
+        .nudge-btn-row {
+          display: flex;
+          justify-content: center;
+          gap: 6px;
+        }
+        .btn-nudge {
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid var(--border-color);
+          color: var(--text-color);
+          border-radius: 4px;
+          padding: 4px 8px;
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .btn-nudge:hover {
+          background: var(--primary-color);
+          color: #0f172a;
+        }
+        .setting-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 10px 0;
+          border-bottom: 1px solid var(--border-color);
+          gap: 16px;
+        }
+        .setting-info {
+          flex: 1;
+        }
+        .setting-title {
+          font-size: 0.85rem;
+          font-weight: 600;
+        }
+        .setting-desc {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          margin-top: 2px;
+        }
+        .setting-control {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+      </style>
+
+      <ha-card>
+        <!-- Header -->
+        <div class="header">
+          <div class="header-top">
+            <div class="title-wrapper">
+              <svg class="card-icon" viewBox="0 0 24 24">
+                <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,5A3,3 0 0,1 15,8A3,3 0 0,1 12,11A3,3 0 0,1 9,8A3,3 0 0,1 12,5M17.13,17C15.92,18.85 14.11,20.24 12,20.92C9.89,20.24 8.08,18.85 6.87,17C6.53,16.5 6.24,16 6,15.47C6,13.82 8.71,12.47 12,12.47C15.29,12.47 18,13.82 18,15.47C17.76,16 17.47,16.5 17.13,17Z"/>
+              </svg>
+              <div class="card-title">${this._config.title || "Presence Onboarding & Calibration Suite"}</div>
+            </div>
+
+            <div class="device-selector-wrapper">
+              <select id="activeDeviceSelect" class="device-select" style="${hasPinnedDevice ? "display: none;" : ""}">
+                ${devices.map(d => `<option value="${d.prefix}" ${this._selectedDevice === d.prefix ? "selected" : ""}>${d.name}</option>`).join("")}
+              </select>
+              <button class="btn-restart" id="btnRestartSensor" title="Reboot ESP32 Node">🔄 Restart</button>
+            </div>
+          </div>
+
+          <!-- Diagnostic Chips -->
+          <div class="chips-bar">
+            <div class="chip" id="chipCalOcc">⚪ Clear</div>
+            <div class="chip" id="chipCalTargets">🎯 0 Targets</div>
+            <div class="chip" id="chipCalLatch" style="display:none;">🧠 Latched</div>
+            <div class="chip" id="chipCalWifi">📶 -- dBm</div>
+          </div>
+        </div>
+
+        <div class="toast-banner" id="toastBanner"></div>
+
+
+        <!-- Interactive Live Viewfinder SVG (Visible on ALL tabs!) -->
+        <div class="mini-viewfinder">
+          <svg id="viewfinderSvg" viewBox="-3000 -500 6000 6500" preserveAspectRatio="xMidYMid meet" style="width:100%; height:100%;">
+            <defs>
+              <radialGradient id="vfBeamGrad" cx="50%" cy="0%" r="100%">
+                <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3" />
+                <stop offset="70%" stop-color="#0284c7" stop-opacity="0.05" />
+                <stop offset="100%" stop-color="#0284c7" stop-opacity="0" />
+              </radialGradient>
+            </defs>
+            <g id="vfRoomLayer"></g>
+            <g id="vfZonesLayer"></g>
+            <g id="vfMasksLayer"></g>
+            <path id="vfBeamCone" fill="url(#vfBeamGrad)" opacity="0.8" />
+            <g id="vfTargetsLayer"></g>
+            <g id="vfSensorLayer"></g>
+          </svg>
+        </div>
+
+        <!-- Tabs Navigation -->
+        <div class="tabs-nav">
+          <button class="tab-btn ${this._activeTab === "placement" ? "active" : ""}" data-tab="placement">📐 Placement & Room</button>
+          <button class="tab-btn ${this._activeTab === "zones" ? "active" : ""}" data-tab="zones">🎯 Detection Zones</button>
+          <button class="tab-btn ${this._activeTab === "masks" ? "active" : ""}" data-tab="masks">🛡️ Exclusion Masks</button>
+          <button class="tab-btn ${this._activeTab === "engine" ? "active" : ""}" data-tab="engine">⚙️ Engine & Sensitivity</button>
+        </div>
+
+        <!-- TAB 1: PLACEMENT & ROOM BOUNDARIES -->
+        <div class="tab-pane ${this._activeTab === "placement" ? "active" : ""}" id="tabPlacement">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Sensor Placement Preset</label>
+              <select class="form-select" id="selPlacementPreset">
+                <option value="center">Center Wall (0°)</option>
+                <option value="corner_45_left">Front-Left Corner (-45° Inward)</option>
+                <option value="corner_45_right">Front-Right Corner (+45° Inward)</option>
+                <option value="left_corner">Left Corner Flat (0°)</option>
+                <option value="right_corner">Right Corner Flat (0°)</option>
+                <option value="custom">Custom Offset & Yaw</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Room Width (mm)</label>
+              <input type="number" class="form-input" id="inpRoomWidth" placeholder="e.g. 4000" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Room Depth (mm)</label>
+              <input type="number" class="form-input" id="inpRoomDepth" placeholder="e.g. 5000" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Sensor Wall Offset X (mm)</label>
+              <input type="number" class="form-input" id="inpWallOffsetX" placeholder="0 = Center" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Mounting Yaw Angle (°)</label>
+              <input type="number" class="form-input" id="inpMountingYaw" placeholder="0 = Facing Room" />
+            </div>
+          </div>
+
+
+
+          <div class="action-row">
+            <button class="btn-primary" id="btnSaveRoomFlash">⚡ Save & Flash Room Boundaries to ESP32</button>
+            <button class="btn-secondary" id="btnResetRoomBounds">↺ Reset to Full Range</button>
+          </div>
+        </div>
+
+        <!-- TAB 2: DETECTION ZONES (ZONES 1 - 4) -->
+        <div class="tab-pane ${this._activeTab === "zones" ? "active" : ""}" id="tabZones">
+          <div class="zones-grid" id="zonesCardsGrid"></div>
+
+          <div class="stepper-box" id="zoneStepperBox">
+            <div class="stepper-header">
+              <span class="stepper-step-pill" id="stepPill">Step 1 of 4</span>
+              <span class="stepper-title" id="stepTitle">Select Zone to Calibrate</span>
+            </div>
+            <div class="stepper-instruction" id="stepInstruction">
+              Choose which detection zone you want to set up (Zone 1 Couch, Zone 2 Desk, etc.).
+            </div>
+
+            <div id="stepInteractiveContent"></div>
+          </div>
+        </div>
+
+        <!-- TAB 3: HARDWARE EXCLUSION MASKS -->
+        <div class="tab-pane ${this._activeTab === "masks" ? "active" : ""}" id="tabMasks">
+          <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:14px;">
+            Hardware exclusion masks tell the LD2450 radar chip to ignore permanent moving/vibrating objects like ceiling fans, fluttery curtains, or TV displays.
+          </div>
+
+          <div class="form-grid" style="grid-template-columns: 1fr; margin-bottom: 14px;">
+            <div class="form-group">
+              <label class="form-label">Hardware Exclusion Filter Mode</label>
+              <select class="form-select" id="selExclusionMode">
+                <option value="Filter moving targets">Filter moving targets (fans, curtains)</option>
+                <option value="Filter still targets">Filter still targets</option>
+                <option value="Filter all targets">Filter all targets</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 14px; width: 100%; box-sizing: border-box;">
+            ${[1, 2, 3].map(m => `
+              <div class="stepper-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <span style="font-weight:700; font-size:0.88rem;">🛡️ Exclusion Mask ${m}</span>
+                  <span style="font-size:0.72rem; color:var(--text-muted);" id="statusMask${m}">Inactive</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;">
+                  <div class="form-group"><label class="form-label">X1 (mm)</label><input type="number" class="form-input" id="inpMask${m}_x1" /></div>
+                  <div class="form-group"><label class="form-label">Y1 (mm)</label><input type="number" class="form-input" id="inpMask${m}_y1" /></div>
+                  <div class="form-group"><label class="form-label">X2 (mm)</label><input type="number" class="form-input" id="inpMask${m}_x2" /></div>
+                  <div class="form-group"><label class="form-label">Y2 (mm)</label><input type="number" class="form-input" id="inpMask${m}_y2" /></div>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap: wrap;">
+                  <button class="btn-primary" style="padding:7px 14px; font-size:0.8rem;" id="btnSaveMask${m}">💾 Save Mask ${m}</button>
+                  <button class="btn-danger" style="padding:7px 14px; font-size:0.8rem;" id="btnClearMask${m}">Clear</button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+
+        <!-- TAB 4: ENGINE & SENSITIVITY -->
+        <div class="tab-pane ${this._activeTab === "engine" ? "active" : ""}" id="tabEngine">
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Maximum Detection Distance</div>
+              <div class="setting-desc">Ignore all reflections and people beyond this distance (cm).</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" class="form-input" id="inpMaxDistance" style="width:90px;" />
+              <button class="btn-secondary" style="padding:6px 10px;" id="btnSaveMaxDist">Set</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Presence Timeout</div>
+              <div class="setting-desc">Seconds to maintain room presence after all motion disappears.</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" class="form-input" id="inpPresenceTimeout" style="width:90px;" />
+              <button class="btn-secondary" style="padding:6px 10px;" id="btnSaveTimeout">Set</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Zone Off Delay</div>
+              <div class="setting-desc">Seconds to wait before turning off zone occupancy.</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" class="form-input" id="inpZoneOffDelay" style="width:90px;" />
+              <button class="btn-secondary" style="padding:6px 10px;" id="btnSaveZoneDelay">Set</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Stationary Presence Memory (Vanish Protection)</div>
+              <div class="setting-desc">Prevents radar from dropping occupancy when a person sits completely still.</div>
+            </div>
+            <div class="setting-control">
+              <input type="checkbox" id="chkStationaryMemory" style="transform:scale(1.3); cursor:pointer;" />
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Stationary Latch Timeout</div>
+              <div class="setting-desc">Minutes to preserve latch when stationary target sits or sleeps (default 30m).</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" class="form-input" id="inpStationaryTimeout" style="width:90px;" />
+              <button class="btn-secondary" style="padding:6px 10px;" id="btnSaveStatTimeout">Set</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Exit Trajectory Margin</div>
+              <div class="setting-desc">Margin in mm from boundaries to immediately release stationary memory on exit.</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" class="form-input" id="inpExitMargin" style="width:90px;" />
+              <button class="btn-secondary" style="padding:6px 10px;" id="btnSaveExitMargin">Set</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Multi-Target Tracking (3 Targets)</div>
+              <div class="setting-desc">Enable tracking up to 3 people simultaneously.</div>
+            </div>
+            <div class="setting-control">
+              <input type="checkbox" id="chkMultiTarget" style="transform:scale(1.3); cursor:pointer;" />
+            </div>
+          </div>
+
+          <div class="action-row" style="margin-top:20px;">
+            <button class="btn-primary" id="btnRestartRadarChip">🔄 Restart Radar Module</button>
+            <button class="btn-danger" id="btnFactoryResetRadar">⚠️ Factory Reset Radar</button>
+          </div>
+        </div>
+      </ha-card>
+    `;
+
+    this._bindEvents();
+    this._initFormStateFromEntities();
+    this._updateViewfinder();
+    this._updateLiveValues();
+  }
+
+  _bindEvents() {
+    const selDevice = this.shadowRoot.getElementById("activeDeviceSelect");
+    if (selDevice) {
+      selDevice.addEventListener("change", (e) => {
+        this._selectedDevice = e.target.value;
+        this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+        window.dispatchEvent(new CustomEvent("radar-device-selected", {
+          detail: { device: this._selectedDevice }
+        }));
+        this._initFormStateFromEntities();
+        this._updateViewfinder();
+        this._showToast(`Switched to ${e.target.options[e.target.selectedIndex].text}`);
+        this._updateLiveValues();
+      });
+    }
+
+    const btnRestart = this.shadowRoot.getElementById("btnRestartSensor");
+    if (btnRestart) {
+      btnRestart.addEventListener("click", () => {
+        if (confirm("Restart ESP32 Presence Sensor?")) {
+          this._pressButton(this._entities.restart_esp);
+          this._showToast("Restart command sent to ESP32 node.");
+        }
+      });
+    }
+
+    this.shadowRoot.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const tab = btn.dataset.tab;
+        this._activeTab = tab;
+        this.shadowRoot.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b === btn));
+        this.shadowRoot.querySelectorAll(".tab-pane").forEach(p => p.classList.toggle("active", p.id === `tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`));
+        if (tab === "placement") {
+          this._updateViewfinder();
+        } else if (tab === "zones") {
+          this._renderZoneCardsAndStepper();
+        }
+      });
+    });
+
+    // Placement Preset change: immediately updates formState and redraws SVG viewfinder!
+    const selPreset = this.shadowRoot.getElementById("selPlacementPreset");
+    const inpOff = this.shadowRoot.getElementById("inpWallOffsetX");
+    const inpYaw = this.shadowRoot.getElementById("inpMountingYaw");
+    const inpW = this.shadowRoot.getElementById("inpRoomWidth");
+    const inpD = this.shadowRoot.getElementById("inpRoomDepth");
+
+    if (selPreset) {
+      const handlePresetChange = (e) => {
+        const p = e.target.value;
+        this._formState.preset = p;
+        const rw = this._formState.roomWidth || 4000;
+
+        switch (p) {
+          case "corner_45_left":
+            this._formState.sensorOffsetX = -Math.round(rw / 2);
+            this._formState.mountingYaw = -45;
+            break;
+          case "corner_45_right":
+            this._formState.sensorOffsetX = Math.round(rw / 2);
+            this._formState.mountingYaw = 45;
+            break;
+          case "left_corner":
+            this._formState.sensorOffsetX = -Math.round(rw / 2);
+            this._formState.mountingYaw = 0;
+            break;
+          case "right_corner":
+            this._formState.sensorOffsetX = Math.round(rw / 2);
+            this._formState.mountingYaw = 0;
+            break;
+          case "center":
+            this._formState.sensorOffsetX = 0;
+            this._formState.mountingYaw = 0;
+            break;
+          case "custom":
+          default:
+            break;
+        }
+
+        if (inpOff) inpOff.value = this._formState.sensorOffsetX;
+        if (inpYaw) inpYaw.value = this._formState.mountingYaw;
+
+        // Immediately update SVG graphics!
+        this._updateViewfinder();
+      };
+
+      selPreset.addEventListener("change", handlePresetChange);
+      selPreset.addEventListener("input", handlePresetChange);
+    }
+
+    // Input changes: update formState and update SVG viewfinder live!
+    if (inpW) {
+      inpW.addEventListener("input", () => {
+        this._formState.roomWidth = Math.max(500, parseFloat(inpW.value) || 4000);
+        // If on an aligned preset, adjust offset
+        if (this._formState.preset === "corner_45_left" || this._formState.preset === "left_corner") {
+          this._formState.sensorOffsetX = -Math.round(this._formState.roomWidth / 2);
+          if (inpOff) inpOff.value = this._formState.sensorOffsetX;
+        } else if (this._formState.preset === "corner_45_right" || this._formState.preset === "right_corner") {
+          this._formState.sensorOffsetX = Math.round(this._formState.roomWidth / 2);
+          if (inpOff) inpOff.value = this._formState.sensorOffsetX;
+        }
+        this._updateViewfinder();
+      });
+    }
+
+    if (inpD) {
+      inpD.addEventListener("input", () => {
+        this._formState.roomDepth = Math.max(500, parseFloat(inpD.value) || 5000);
+        this._updateViewfinder();
+      });
+    }
+
+    if (inpOff) {
+      inpOff.addEventListener("input", () => {
+        const v = parseFloat(inpOff.value);
+        if (!isNaN(v)) {
+          this._formState.sensorOffsetX = v;
+        }
+        this._formState.preset = "custom";
+        if (selPreset) selPreset.value = "custom";
+        this._updateViewfinder();
+      });
+    }
+
+    if (inpYaw) {
+      inpYaw.addEventListener("input", () => {
+        const v = parseFloat(inpYaw.value);
+        if (!isNaN(v)) {
+          this._formState.mountingYaw = v;
+        }
+        this._formState.preset = "custom";
+        if (selPreset) selPreset.value = "custom";
+        this._updateViewfinder();
+      });
+    }
+
+    // Save & Flash to ESP32
+    const btnFlash = this.shadowRoot.getElementById("btnSaveRoomFlash");
+    if (btnFlash) {
+      btnFlash.addEventListener("click", () => {
+        const rw = this._formState.roomWidth || 4000;
+        const rd = this._formState.roomDepth || 5000;
+        const off = this._formState.sensorOffsetX || 0;
+        const yaw = this._formState.mountingYaw || 0;
+
+        if (this._entities.room_width) this._setNumber(this._entities.room_width, rw);
+        if (this._entities.room_depth) this._setNumber(this._entities.room_depth, rd);
+        if (this._entities.sensor_wall_offset_x) this._setNumber(this._entities.sensor_wall_offset_x, off);
+        if (this._entities.mounting_angle) this._setNumber(this._entities.mounting_angle, yaw);
+
+        setTimeout(() => {
+          if (this._entities.apply_room_dimensions_btn) {
+            this._pressButton(this._entities.apply_room_dimensions_btn);
+          } else {
+            let minX = 0, maxX = 0;
+            if (Math.abs(yaw - (-45)) < 2) {
+              minX = 0; maxX = rw;
+            } else if (Math.abs(yaw - 45) < 2) {
+              minX = -rw; maxX = 0;
+            } else {
+              minX = -(rw * 0.5 + off);
+              maxX = +(rw * 0.5 - off);
+            }
+            if (this._entities.room_min_x) this._setNumber(this._entities.room_min_x, minX);
+            if (this._entities.room_max_x) this._setNumber(this._entities.room_max_x, maxX);
+            if (this._entities.room_min_y) this._setNumber(this._entities.room_min_y, 0);
+            if (this._entities.room_max_y) this._setNumber(this._entities.room_max_y, rd);
+          }
+          this._showToast("⚡ Room boundaries successfully flashed to ESP32!");
+        }, 300);
+      });
+    }
+
+    const btnReset = this.shadowRoot.getElementById("btnResetRoomBounds");
+    if (btnReset) {
+      btnReset.addEventListener("click", () => {
+        this._formState.preset = "center";
+        this._formState.sensorOffsetX = 0;
+        this._formState.mountingYaw = 0;
+        this._formState.roomWidth = 6000;
+        this._formState.roomDepth = 6000;
+
+        if (selPreset) selPreset.value = "center";
+        if (inpW) inpW.value = 6000;
+        if (inpD) inpD.value = 6000;
+        if (inpOff) inpOff.value = 0;
+        if (inpYaw) inpYaw.value = 0;
+
+        this._updateViewfinder();
+
+        if (this._entities.room_min_x) this._setNumber(this._entities.room_min_x, -3000);
+        if (this._entities.room_max_x) this._setNumber(this._entities.room_max_x, 3000);
+        if (this._entities.room_min_y) this._setNumber(this._entities.room_min_y, 0);
+        if (this._entities.room_max_y) this._setNumber(this._entities.room_max_y, 6000);
+        if (this._entities.mounting_angle) this._setNumber(this._entities.mounting_angle, 0);
+        this._showToast("Boundaries reset to default radar range.");
+      });
+    }
+
+    // Engine Tab Event Handlers
+    const bindNumSave = (btnId, inputId, entityKey, toastText) => {
+      const b = this.shadowRoot.getElementById(btnId);
+      if (b) {
+        b.addEventListener("click", () => {
+          const val = parseFloat(this.shadowRoot.getElementById(inputId).value);
+          if (!isNaN(val)) {
+            this._setNumber(this._entities[entityKey], val);
+            this._showToast(toastText);
+          }
+        });
+      }
+    };
+    bindNumSave("btnSaveMaxDist", "inpMaxDistance", "max_distance", "Max distance updated.");
+    bindNumSave("btnSaveTimeout", "inpPresenceTimeout", "presence_timeout", "Presence timeout updated.");
+    bindNumSave("btnSaveZoneDelay", "inpZoneOffDelay", "zone_off_delay", "Zone off delay updated.");
+    bindNumSave("btnSaveStatTimeout", "inpStationaryTimeout", "stationary_latch_timeout", "Stationary latch timeout updated.");
+    bindNumSave("btnSaveExitMargin", "inpExitMargin", "exit_trajectory_margin", "Exit trajectory margin updated.");
+
+    const chkStat = this.shadowRoot.getElementById("chkStationaryMemory");
+    if (chkStat) {
+      chkStat.addEventListener("change", () => {
+        this._toggleSwitch(this._entities.stationary_memory_switch);
+        this._showToast("Stationary memory toggled.");
+      });
+    }
+
+    const chkMulti = this.shadowRoot.getElementById("chkMultiTarget");
+    if (chkMulti) {
+      chkMulti.addEventListener("change", () => {
+        this._toggleSwitch(this._entities.multi_target);
+        this._showToast("Multi-target tracking toggled.");
+      });
+    }
+
+    const btnRestRad = this.shadowRoot.getElementById("btnRestartRadarChip");
+    if (btnRestRad) {
+      btnRestRad.addEventListener("click", () => {
+        this._pressButton(this._entities.restart_radar);
+        this._showToast("Radar module restart command sent.");
+      });
+    }
+
+    const btnResetRad = this.shadowRoot.getElementById("btnFactoryResetRadar");
+    if (btnResetRad) {
+      btnResetRad.addEventListener("click", () => {
+        if (confirm("Reset LD2450 radar chip to factory settings?")) {
+          this._pressButton(this._entities.factory_reset_radar);
+          this._showToast("Factory reset command sent.");
+        }
+      });
+    }
+
+    for (let m = 1; m <= 3; m++) {
+      const btnSave = this.shadowRoot.getElementById(`btnSaveMask${m}`);
+      if (btnSave) {
+        btnSave.addEventListener("click", () => {
+          const x1 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_x1`).value) || 0;
+          const y1 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_y1`).value) || 0;
+          const x2 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_x2`).value) || 0;
+          const y2 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_y2`).value) || 0;
+          this._setNumber(this._entities[`mask${m}_x1`], x1);
+          this._setNumber(this._entities[`mask${m}_y1`], y1);
+          this._setNumber(this._entities[`mask${m}_x2`], x2);
+          this._setNumber(this._entities[`mask${m}_y2`], y2);
+          this._showToast(`Mask ${m} saved to hardware memory.`);
+          this._updateViewfinder();
+        });
+      }
+
+      // Live typing on mask coordinates updates viewfinder map!
+      ["x1", "y1", "x2", "y2"].forEach(coord => {
+        const inp = this.shadowRoot.getElementById(`inpMask${m}_${coord}`);
+        if (inp) {
+          inp.addEventListener("input", () => this._updateViewfinder());
+        }
+      });
+      const btnClr = this.shadowRoot.getElementById(`btnClearMask${m}`);
+      if (btnClr) {
+        btnClr.addEventListener("click", () => {
+          this._setNumber(this._entities[`mask${m}_x1`], 0);
+          this._setNumber(this._entities[`mask${m}_y1`], 0);
+          this._setNumber(this._entities[`mask${m}_x2`], 0);
+          this._setNumber(this._entities[`mask${m}_y2`], 0);
+          this.shadowRoot.getElementById(`inpMask${m}_x1`).value = 0;
+          this.shadowRoot.getElementById(`inpMask${m}_y1`).value = 0;
+          this.shadowRoot.getElementById(`inpMask${m}_x2`).value = 0;
+          this.shadowRoot.getElementById(`inpMask${m}_y2`).value = 0;
+          this._showToast(`Mask ${m} cleared.`);
+        });
+      }
+    }
+  }
+
+  // Updates the SVG Viewfinder graphics instantly based on current formState!
+  _updateViewfinder() {
+    if (!this.shadowRoot) return;
+
+    const rw = Math.max(1000, this._formState.roomWidth || 4000);
+    const rd = Math.max(1000, this._formState.roomDepth || 5000);
+    const off = this._formState.sensorOffsetX || 0;
+    const yaw = this._formState.mountingYaw || 0;
+
+    // Sensor position along the front wall: center is rw / 2, plus offset
+    const sx = Math.max(0, Math.min(rw, (rw / 2) + off));
+    const sy = 0;
+
+    const previewGeom = {
+      hasRoom: true,
+      roomWidth: rw,
+      roomDepth: rd,
+      sx: sx,
+      sy: sy,
+      angle: yaw,
+      sensorOffsetX: off
+    };
+
+    // 1. Update SVG ViewBox & Clip
+    const svg = this.shadowRoot.getElementById("viewfinderSvg");
+    if (svg) {
+      const margin = 500;
+      svg.setAttribute("viewBox", `${-margin} ${-margin} ${rw + margin * 2} ${rd + margin * 2}`);
+      const vfClipRect = this.shadowRoot.getElementById("vfRoomClipRect");
+      if (vfClipRect) {
+        vfClipRect.setAttribute("width", rw);
+        vfClipRect.setAttribute("height", rd);
+      }
+    }
+
+    // 2. Update Room Walls
+    const vfRoom = this.shadowRoot.getElementById("vfRoomLayer");
+    if (vfRoom) {
+      vfRoom.innerHTML = `
+        <rect x="0" y="0" width="${rw}" height="${rd}"
+              fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="8" rx="6" />
+        <text x="${rw / 2}" y="-120" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle">
+          ${Math.round(rw)} mm
+        </text>
+        <text x="-120" y="${rd / 2}" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle"
+              transform="rotate(-90, -120, ${rd / 2})">
+          ${Math.round(rd)} mm
+        </text>
+      `;
+    }
+
+    // 3. Update Sensor Icon & Angled Beam Cone
+    const vfBeamCone = this.shadowRoot.getElementById("vfBeamCone");
+    const vfSensor = this.shadowRoot.getElementById("vfSensorLayer");
+    if (vfBeamCone && vfSensor) {
+      vfSensor.innerHTML = `
+        <circle cx="${sx}" cy="${sy}" r="120" fill="#0284c7" stroke="#38bdf8" stroke-width="12" />
+        <circle cx="${sx}" cy="${sy}" r="40" fill="#fff" />
+      `;
+
+      const beamDist = Math.max(rw, rd) * 1.3;
+      const radCenter = (((yaw || 0) + 90) * Math.PI) / 180;
+      const fovRad = (60 * Math.PI) / 180;
+      const lx = sx + beamDist * Math.cos(radCenter - fovRad);
+      const ly = sy + beamDist * Math.sin(radCenter - fovRad);
+      const rx = sx + beamDist * Math.cos(radCenter + fovRad);
+      const ry = sy + beamDist * Math.sin(radCenter + fovRad);
+
+      vfBeamCone.setAttribute("d", `M ${sx} ${sy} L ${lx} ${ly} A ${beamDist} ${beamDist} 0 0 1 ${rx} ${ry} Z`);
+    }
+
+    // 4. Update Zones inside Viewfinder
+    const vfZones = this.shadowRoot.getElementById("vfZonesLayer");
+    if (vfZones && this._entities && this._hass) {
+      const ent = this._entities;
+      const states = this._hass.states;
+      const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+      const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+
+      let zHtml = "";
+      for (let z = 1; z <= 4; z++) {
+        let x1 = getVal(ent[`zone${z}_x1`]);
+        let y1 = getVal(ent[`zone${z}_y1`]);
+        let x2 = getVal(ent[`zone${z}_x2`]);
+        let y2 = getVal(ent[`zone${z}_y2`]);
+        let zAngle = getVal(ent[`zone${z}_angle`], 0);
+        const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
+
+        // If user is currently editing manual inputs for selected zone, preview those live
+        if (z === this._selectedZone) {
+          const inX1 = this.shadowRoot.getElementById("inpZone_x1");
+          const inY1 = this.shadowRoot.getElementById("inpZone_y1");
+          const inX2 = this.shadowRoot.getElementById("inpZone_x2");
+          const inY2 = this.shadowRoot.getElementById("inpZone_y2");
+          const inAng = this.shadowRoot.getElementById("inpZone_angle");
+          if (inX1 && inY1 && inX2 && inY2) {
+            const vx1 = parseFloat(inX1.value);
+            const vy1 = parseFloat(inY1.value);
+            const vx2 = parseFloat(inX2.value);
+            const vy2 = parseFloat(inY2.value);
+            const va = inAng ? parseFloat(inAng.value) : 0;
+            if (!isNaN(vx1)) x1 = vx1;
+            if (!isNaN(vy1)) y1 = vy1;
+            if (!isNaN(vx2)) x2 = vx2;
+            if (!isNaN(vy2)) y2 = vy2;
+            if (!isNaN(va)) zAngle = va;
+          }
+        }
+
+        if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
+          const corners = RoomGeometry.transformZonePolygon(x1, y1, x2, y2, zAngle, previewGeom);
+          const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+          const stroke = z === this._selectedZone ? "#f59e0b" : (zOcc ? "#10b981" : "#38bdf8");
+          const fill = z === this._selectedZone ? "rgba(245, 158, 11, 0.2)" : (zOcc ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.08)");
+
+          zHtml += `
+            <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" />
+            <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                  font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+              Zone ${z}${zOcc ? " 👤" : ""}
+            </text>
+          `;
+        }
+      }
+      vfZones.innerHTML = zHtml;
+    }
+
+    // 4b. Update Exclusion Masks inside Viewfinder
+    const vfMasks = this.shadowRoot.getElementById("vfMasksLayer");
+    if (vfMasks && this._entities && this._hass) {
+      const ent = this._entities;
+      const states = this._hass.states;
+      const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+
+      let mHtml = "";
+      for (let m = 1; m <= 3; m++) {
+        let mx1 = getVal(ent[`mask${m}_x1`]);
+        let my1 = getVal(ent[`mask${m}_y1`]);
+        let mx2 = getVal(ent[`mask${m}_x2`]);
+        let my2 = getVal(ent[`mask${m}_y2`]);
+
+        const inX1 = this.shadowRoot.getElementById(`inpMask${m}_x1`);
+        const inY1 = this.shadowRoot.getElementById(`inpMask${m}_y1`);
+        const inX2 = this.shadowRoot.getElementById(`inpMask${m}_x2`);
+        const inY2 = this.shadowRoot.getElementById(`inpMask${m}_y2`);
+        if (inX1 && inY1 && inX2 && inY2) {
+          const vx1 = parseFloat(inX1.value);
+          const vy1 = parseFloat(inY1.value);
+          const vx2 = parseFloat(inX2.value);
+          const vy2 = parseFloat(inY2.value);
+          if (!isNaN(vx1)) mx1 = vx1;
+          if (!isNaN(vy1)) my1 = vy1;
+          if (!isNaN(vx2)) mx2 = vx2;
+          if (!isNaN(vy2)) my2 = vy2;
+        }
+
+        const statusEl = this.shadowRoot.getElementById(`statusMask${m}`);
+        const isConfigured = !(mx1 === 0 && mx2 === 0 && my1 === 0 && my2 === 0);
+        if (statusEl) {
+          statusEl.textContent = isConfigured ? "🛡️ Active" : "Inactive";
+          statusEl.style.color = isConfigured ? "#ef4444" : "var(--text-muted)";
+        }
+
+        if (isConfigured) {
+          const corners = RoomGeometry.transformZonePolygon(mx1, my1, mx2, my2, 0, previewGeom);
+          const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+          mHtml += `
+            <polygon points="${pts}" fill="rgba(239, 68, 68, 0.15)" stroke="#ef4444" stroke-width="12" stroke-dasharray="25,15" />
+            <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="#ef4444"
+                  font-size="130" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+              Mask ${m} 🛡️
+            </text>
+          `;
+        }
+      }
+      vfMasks.innerHTML = mHtml;
+    }
+
+    // 5. Update Targets
+    this._updateVfTargets(previewGeom);
+  }
+
+  // Live targets projected using current preview geometry
+  _updateVfTargets(previewGeom) {
+    const vfTargets = this.shadowRoot.getElementById("vfTargetsLayer");
+    if (!vfTargets || !this._entities || !this._hass) return;
+
+    const ent = this._entities;
+    const states = this._hass.states;
+    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+
+    let tHtml = "";
+    for (let t = 1; t <= 3; t++) {
+      const tx = getVal(ent[`target${t}_x`]);
+      const ty = getVal(ent[`target${t}_y`]);
+      const dist = getVal(ent[`target${t}_distance`]);
+
+      if (ty > 0) {
+        const pt = RoomGeometry.transformPoint(tx, ty, previewGeom);
+        const color = t === 1 ? "#38bdf8" : (t === 2 ? "#a855f7" : "#f59e0b");
+
+        tHtml += `
+          <circle cx="${pt.x}" cy="${pt.y}" r="120" fill="${color}" opacity="0.3" />
+          <circle cx="${pt.x}" cy="${pt.y}" r="70" fill="${color}" stroke="#fff" stroke-width="14" />
+          <text x="${pt.x}" y="${pt.y - 100}" fill="#fff" font-size="130" font-weight="800" text-anchor="middle">
+            T${t} (${Math.round(dist)}mm)
+          </text>
+        `;
+      }
+    }
+    vfTargets.innerHTML = tHtml;
+  }
+
+  // Only updates live status badges & live telemetry — NEVER touches or overwrites form inputs!
+  _updateLiveValues() {
+    if (!this._hass || !this.shadowRoot) return;
+    if (!this._entities) {
+      this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+    }
+
+    // If device switched, re-init formState
+    if (this._formState.device !== this._selectedDevice) {
+      this._initFormStateFromEntities();
+      this._updateViewfinder();
+    }
+
+    const ent = this._entities;
+    const states = this._hass.states;
+    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+    const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+
+    // Header Chips
+    const occ = getState(ent.occupancy, "off") === "on";
+    const chipOcc = this.shadowRoot.getElementById("chipCalOcc");
+    if (chipOcc) {
+      chipOcc.className = "chip " + (occ ? "occupied" : "");
+      chipOcc.textContent = occ ? "🟢 Occupied" : "⚪ Clear";
+    }
+
+    const tc = getVal(ent.target_count, 0);
+    const chipTc = this.shadowRoot.getElementById("chipCalTargets");
+    if (chipTc) {
+      chipTc.textContent = `🎯 ${tc} Target${tc === 1 ? "" : "s"}`;
+    }
+
+    const latched = getState(ent.stationary_memory_active, "off") === "on";
+    const chipLatch = this.shadowRoot.getElementById("chipCalLatch");
+    if (chipLatch) {
+      chipLatch.style.display = latched ? "inline-flex" : "none";
+      chipLatch.className = "chip latched";
+    }
+
+    const wifi = states[ent.wifi_signal] ? states[ent.wifi_signal].state : "--";
+    const chipWifi = this.shadowRoot.getElementById("chipCalWifi");
+    if (chipWifi) {
+      chipWifi.textContent = `📶 ${wifi} dBm`;
+    }
+
+    // Viewfinder is visible on ALL tabs! Update targets on all tabs:
+    const rw = Math.max(1000, this._formState.roomWidth || 4000);
+    const rd = Math.max(1000, this._formState.roomDepth || 5000);
+    const off = this._formState.sensorOffsetX || 0;
+    const yaw = this._formState.mountingYaw || 0;
+    const previewGeom = {
+      hasRoom: true,
+      roomWidth: rw,
+      roomDepth: rd,
+      sx: Math.max(0, Math.min(rw, (rw / 2) + off)),
+      sy: 0,
+      angle: yaw,
+      sensorOffsetX: off
+    };
+    this._updateVfTargets(previewGeom);
+
+    if (this._activeTab === "zones") {
+      this._renderZoneCardsAndStepper();
+    }
+  }
+
+  _renderZoneCardsAndStepper() {
+    const grid = this.shadowRoot.getElementById("zonesCardsGrid");
+    if (!grid) return;
+
+    const ent = this._entities;
+    const states = this._hass.states;
+    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+    const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+
+    let cardsHtml = "";
+    for (let z = 1; z <= 4; z++) {
+      const x1 = getVal(ent[`zone${z}_x1`]);
+      const y1 = getVal(ent[`zone${z}_y1`]);
+      const x2 = getVal(ent[`zone${z}_x2`]);
+      const y2 = getVal(ent[`zone${z}_y2`]);
+      const angle = getVal(ent[`zone${z}_angle`], 0);
+      const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
+      const isOcc = getState(ent[`zone${z}_occupancy`]) === "on";
+      const isSelected = z === this._selectedZone;
+
+      const width = isConfigured ? Math.abs(x2 - x1) : 0;
+      const depth = isConfigured ? Math.abs(y2 - y1) : 0;
+
+      cardsHtml += `
+        <div class="zone-card ${isSelected ? "selected" : ""}" data-zone="${z}">
+          <div class="zone-card-header">
+            <div class="zone-card-title">Zone ${z}</div>
+            <div class="zone-status-badge ${isOcc ? "occupied" : ""}">
+              ${isOcc ? "OCCUPIED" : (isConfigured ? "ACTIVE" : "EMPTY")}
+            </div>
+          </div>
+          <div class="zone-coords-info">
+            ${isConfigured ? `
+              <div>Size: <b>${width} × ${depth} mm</b></div>
+              <div>Center: (${Math.round((x1+x2)/2)}, ${Math.round((y1+y2)/2)}) ${angle !== 0 ? `[${angle}°]` : ""}</div>
+            ` : `
+              <div>Not configured yet</div>
+              <div>Click to setup with walk-in wizard</div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+    grid.innerHTML = cardsHtml;
+
+    grid.querySelectorAll(".zone-card").forEach(c => {
+      c.addEventListener("click", () => {
+        this._selectedZone = parseInt(c.dataset.zone, 10);
+        this._setSelect(ent.zone_select, `Zone ${this._selectedZone}`);
+        this._renderZoneCardsAndStepper();
+      });
+    });
+
+    const curZ = this._selectedZone;
+    const x1 = getVal(ent[`zone${curZ}_x1`]);
+    const y1 = getVal(ent[`zone${curZ}_y1`]);
+    const x2 = getVal(ent[`zone${curZ}_x2`]);
+    const y2 = getVal(ent[`zone${curZ}_y2`]);
+    const angle = getVal(ent[`zone${curZ}_angle`], 0);
+    const isOcc = getState(ent[`zone${curZ}_occupancy`]) === "on";
+
+    const t1Dist = getVal(ent.target1_distance, 0);
+    const t1X = getVal(ent.target1_x, 0);
+    const t1Y = getVal(ent.target1_y, 0);
+
+    const stepPill = this.shadowRoot.getElementById("stepPill");
+    const stepTitle = this.shadowRoot.getElementById("stepTitle");
+    const stepInstr = this.shadowRoot.getElementById("stepInstruction");
+    const stepContent = this.shadowRoot.getElementById("stepInteractiveContent");
+
+    if (!stepContent) return;
+
+    stepPill.textContent = `Zone ${curZ}`;
+    stepTitle.textContent = `Zone ${curZ} Calibration & Manual Coordinates`;
+    stepInstr.innerHTML = `
+      Live Target Lock: <b>${t1Y > 0 ? `Target 1 detected at X:${Math.round(t1X)} Y:${Math.round(t1Y)} (${Math.round(t1Dist)}mm)` : "No targets in room — walk in to calibrate"}</b>
+    `;
+
+    // Only re-build stepContent if zone selection changed to avoid interrupting manual input typing
+    if (this._lastRenderedZone !== curZ) {
+      this._lastRenderedZone = curZ;
+
+      stepContent.innerHTML = `
+        <!-- Walk-in Wizard Buttons -->
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+          <button class="btn-primary" style="padding:8px 14px; font-size:0.82rem;" id="btnCaptureCorner1">📍 1. Capture Corner 1</button>
+          <button class="btn-primary" style="padding:8px 14px; font-size:0.82rem;" id="btnCaptureCorner2">📍 2. Capture Corner 2 & Save</button>
+          <button class="btn-danger" style="padding:8px 14px; font-size:0.82rem;" id="btnClearZone">🗑️ Clear Zone ${curZ}</button>
+        </div>
+
+        <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">
+          Manual Coordinates & ±50mm Nudges
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:14px;">
+          <div class="form-group" style="min-width:0;">
+            <label class="form-label">X1 (mm)</label>
+            <input type="number" class="form-input" id="inpZone_x1" value="${Math.round(x1)}" style="margin-bottom:4px;" />
+            <div style="display:flex; gap:4px;">
+              <button class="btn-nudge" data-coord="x1" data-delta="-50" style="flex:1;">-50</button>
+              <button class="btn-nudge" data-coord="x1" data-delta="50" style="flex:1;">+50</button>
+            </div>
+          </div>
+
+          <div class="form-group" style="min-width:0;">
+            <label class="form-label">Y1 (mm)</label>
+            <input type="number" class="form-input" id="inpZone_y1" value="${Math.round(y1)}" style="margin-bottom:4px;" />
+            <div style="display:flex; gap:4px;">
+              <button class="btn-nudge" data-coord="y1" data-delta="-50" style="flex:1;">-50</button>
+              <button class="btn-nudge" data-coord="y1" data-delta="50" style="flex:1;">+50</button>
+            </div>
+          </div>
+
+          <div class="form-group" style="min-width:0;">
+            <label class="form-label">X2 (mm)</label>
+            <input type="number" class="form-input" id="inpZone_x2" value="${Math.round(x2)}" style="margin-bottom:4px;" />
+            <div style="display:flex; gap:4px;">
+              <button class="btn-nudge" data-coord="x2" data-delta="-50" style="flex:1;">-50</button>
+              <button class="btn-nudge" data-coord="x2" data-delta="50" style="flex:1;">+50</button>
+            </div>
+          </div>
+
+          <div class="form-group" style="min-width:0;">
+            <label class="form-label">Y2 (mm)</label>
+            <input type="number" class="form-input" id="inpZone_y2" value="${Math.round(y2)}" style="margin-bottom:4px;" />
+            <div style="display:flex; gap:4px;">
+              <button class="btn-nudge" data-coord="y2" data-delta="-50" style="flex:1;">-50</button>
+              <button class="btn-nudge" data-coord="y2" data-delta="50" style="flex:1;">+50</button>
+            </div>
+          </div>
+
+          <div class="form-group" style="min-width:0;">
+            <label class="form-label">Angle (°)</label>
+            <input type="number" class="form-input" id="inpZone_angle" value="${Math.round(angle)}" style="margin-bottom:4px;" />
+            <div style="display:flex; gap:4px;">
+              <button class="btn-nudge" data-coord="angle" data-delta="-5" style="flex:1;">-5°</button>
+              <button class="btn-nudge" data-coord="angle" data-delta="5" style="flex:1;">+5°</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-bottom:14px;">
+          <button class="btn-primary" style="padding:10px 18px; font-size:0.85rem;" id="btnSaveZoneManual">
+            💾 Save Zone ${curZ} Coordinates to ESP32
+          </button>
+        </div>
+
+        <div id="zoneLiveVerifBox" style="padding:10px; border-radius:8px; background:${isOcc ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.04)"}; border:1px solid ${isOcc ? "rgba(16, 185, 129, 0.4)" : "var(--border-color)"}; display:flex; align-items:center; justify-content:space-between;">
+          <span style="font-size:0.85rem; font-weight:600;">Zone ${curZ} Live Verification:</span>
+          <span id="zoneLiveVerifPill" style="font-size:0.85rem; font-weight:700; color:${isOcc ? "#34d399" : "var(--text-muted)"};">
+            ${isOcc ? "👤 OCCUPIED" : "⚪ CLEAR"}
+          </span>
+        </div>
+      `;
+
+      const btnC1 = stepContent.querySelector("#btnCaptureCorner1");
+      if (btnC1) {
+        btnC1.addEventListener("click", () => {
+          this._setSelect(ent.zone_select, `Zone ${curZ}`);
+          setTimeout(() => {
+            this._pressButton(ent.btn_corner_1);
+            this._showToast(`📍 Corner 1 captured for Zone ${curZ}! Now walk to Corner 2.`);
+          }, 150);
+        });
+      }
+
+      const btnC2 = stepContent.querySelector("#btnCaptureCorner2");
+      if (btnC2) {
+        btnC2.addEventListener("click", () => {
+          this._pressButton(ent.btn_corner_2);
+          this._showToast(`✅ Corner 2 captured! Zone ${curZ} saved to ESP32 memory.`);
+        });
+      }
+
+      const btnClr = stepContent.querySelector("#btnClearZone");
+      if (btnClr) {
+        btnClr.addEventListener("click", () => {
+          if (confirm(`Clear coordinates for Zone ${curZ}?`)) {
+            this._setSelect(ent.zone_select, `Zone ${curZ}`);
+            setTimeout(() => {
+              this._pressButton(ent.btn_clear_zone);
+              this._showToast(`Zone ${curZ} cleared.`);
+              this._lastRenderedZone = null;
+              this._renderZoneCardsAndStepper();
+            }, 150);
+          }
+        });
+      }
+
+      // Manual Save Button
+      const btnSaveManual = stepContent.querySelector("#btnSaveZoneManual");
+      if (btnSaveManual) {
+        btnSaveManual.addEventListener("click", () => {
+          const zx1 = parseFloat(stepContent.querySelector("#inpZone_x1").value) || 0;
+          const zy1 = parseFloat(stepContent.querySelector("#inpZone_y1").value) || 0;
+          const zx2 = parseFloat(stepContent.querySelector("#inpZone_x2").value) || 0;
+          const zy2 = parseFloat(stepContent.querySelector("#inpZone_y2").value) || 0;
+          const zang = parseFloat(stepContent.querySelector("#inpZone_angle").value) || 0;
+
+          this._setNumber(ent[`zone${curZ}_x1`], zx1);
+          this._setNumber(ent[`zone${curZ}_y1`], zy1);
+          this._setNumber(ent[`zone${curZ}_x2`], zx2);
+          this._setNumber(ent[`zone${curZ}_y2`], zy2);
+          this._setNumber(ent[`zone${curZ}_angle`], zang);
+          this._showToast(`💾 Zone ${curZ} coordinates saved to ESP32!`);
+          this._updateViewfinder();
+        });
+      }
+
+      // Live typing update in Viewfinder
+      ["inpZone_x1", "inpZone_y1", "inpZone_x2", "inpZone_y2", "inpZone_angle"].forEach(id => {
+        const input = stepContent.querySelector(`#${id}`);
+        if (input) {
+          input.addEventListener("input", () => {
+            this._updateViewfinder();
+          });
+        }
+      });
+
+      // Nudge buttons
+      stepContent.querySelectorAll(".btn-nudge").forEach(b => {
+        b.addEventListener("click", () => {
+          const coord = b.dataset.coord;
+          const delta = parseFloat(b.dataset.delta);
+          const input = stepContent.querySelector(`#inpZone_${coord}`);
+          if (input) {
+            const currentVal = parseFloat(input.value) || 0;
+            const newVal = currentVal + delta;
+            input.value = newVal;
+            const entityId = ent[`zone${curZ}_${coord}`];
+            this._setNumber(entityId, newVal);
+            this._updateViewfinder();
+          }
+        });
+      });
+    } else {
+      // Non-destructive update of status pill when not re-rendering
+      const pill = stepContent.querySelector("#zoneLiveVerifPill");
+      const box = stepContent.querySelector("#zoneLiveVerifBox");
+      if (pill && box) {
+        pill.textContent = isOcc ? "👤 OCCUPIED" : "⚪ CLEAR";
+        pill.style.color = isOcc ? "#34d399" : "var(--text-muted)";
+        box.style.background = isOcc ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.04)";
+        box.style.borderColor = isOcc ? "rgba(16, 185, 129, 0.4)" : "var(--border-color)";
+      }
+    }
+  }
+}
+
+
+
+// ====================================================================
+// ELEMENT REGISTRATION & COMPATIBILITY
+// ====================================================================
+if (!customElements.get("radar-map-card-editor")) {
+  customElements.define("radar-map-card-editor", RadarMapCardEditor);
+}
+
+if (!customElements.get("radar-map-card")) {
+  customElements.define("radar-map-card", RadarMapCard);
+}
+
+if (!customElements.get("radar-calibration-card-editor")) {
+  customElements.define("radar-calibration-card-editor", RadarCalibrationCardEditor);
+}
+
+if (!customElements.get("radar-calibration-card")) {
+  customElements.define("radar-calibration-card", RadarCalibrationCard);
+}
+
+if (!customElements.get("presence-calibration-card")) {
+  customElements.define("presence-calibration-card", RadarCalibrationCard);
+}
+
+console.log("[PRESENCE-RADAR-CARDS] v1.5.5 High-Precision mmWave Radar Suite initialized.");

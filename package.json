@@ -1,0 +1,20 @@
+{
+  "name": "presence-radar-card",
+  "version": "1.5.5",
+  "description": "High-Precision mmWave Radar Visualization & Onboarding Calibration Suite for Home Assistant and ESPHome LD2450.",
+  "main": "dist/presence-radar-card.js",
+  "scripts": {},
+  "keywords": [
+    "home-assistant",
+    "homeassistant",
+    "esphome",
+    "lovelace",
+    "custom-card",
+    "ld2450",
+    "mmwave",
+    "radar",
+    "presence-detection"
+  ],
+  "author": "Open Source Community",
+  "license": "MIT"
+}

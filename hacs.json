@@ -1,0 +1,5 @@
+{
+  "name": "ESPHome mmWave Radar Suite",
+  "render_readme": true,
+  "filename": "presence-radar-card.js"
+}

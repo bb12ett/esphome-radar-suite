@@ -1,0 +1,13 @@
+# ====================================================================
+# Example Node Configuration (e.g. living-room-presence.yaml)
+# ====================================================================
+
+substitutions:
+  node_name: "living-room-presence"
+  friendly_name: "Living Room Presence"
+  tx_pin: "GPIO21"      # Connect to LD2450 RX
+  rx_pin: "GPIO20"      # Connect to LD2450 TX
+  board: "esp32-c3-devkitm-1"
+
+packages:
+  radar_base: !include ld2450_full.yaml

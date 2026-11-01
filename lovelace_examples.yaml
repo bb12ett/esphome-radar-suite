@@ -1,0 +1,39 @@
+# ====================================================================
+# ESPHome mmWave Radar Suite — Lovelace Card Examples
+# ====================================================================
+
+# --------------------------------------------------------------------
+# 1. RADAR MAP CARD — MINIMAL MODE (Clean Live Map Only)
+# Ideal for clean room overview dashboards or mobile wall mounts.
+# --------------------------------------------------------------------
+type: custom:radar-map-card
+title: Living Room Radar
+device: living_room_presence       # Locks to sensor & hides dropdown. Omit to enable dropdown.
+layout_mode: minimal               # "minimal" (radar map only) or "full"
+
+# --------------------------------------------------------------------
+# 2. RADAR MAP CARD — FULL MODE (With Target Details & Zone Status)
+# Displays live target speeds, distances, and zone occupancy badges.
+# --------------------------------------------------------------------
+type: custom:radar-map-card
+title: Living Room Radar
+device: living_room_presence
+layout_mode: full
+
+# --------------------------------------------------------------------
+# 3. RADAR MAP CARD — MULTI-ROOM / DYNAMIC AUTO-DISCOVERY
+# Allows switching between ANY detected mmWave sensor in your home!
+# --------------------------------------------------------------------
+type: custom:radar-map-card
+title: Whole House Radar
+device: ""                         # Setting to "" enables "Select on drop-down"
+layout_mode: full
+
+# --------------------------------------------------------------------
+# 4. PRESENCE CALIBRATION & ONBOARDING SUITE (All-in-One Wizard)
+# Full suite with persistent live map, walk-in auto-calibrator,
+# manual coordinate entry, exclusion masks, and engine tuning.
+# --------------------------------------------------------------------
+type: custom:radar-calibration-card
+title: Presence Calibration Suite
+device: ""                         # Can onboard any sensor in the home from this single card!

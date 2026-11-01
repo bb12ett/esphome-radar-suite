@@ -1,0 +1,1346 @@
+# ====================================================================
+# SHARED BASE: Hi-Link LD2450 mmWave Radar + Bluetooth Proxy (BLE)
+# Everything Presence Lite Architecture + 4 Detection Zones + 3 Hardware
+# Exclusion Zones + "Stationary Presence Memory" + One-Touch Zone Calibrator
+# Optimized for ESP32 / ESP32-C3 + Home Assistant
+# ====================================================================
+
+substitutions:
+  board: "esp32-c3-devkitm-1"
+  tx_pin: "GPIO21"
+  rx_pin: "GPIO20"
+
+esphome:
+  name: "${node_name}"
+  friendly_name: "${friendly_name}"
+  min_version: 2024.6.0
+  includes:
+    - presence_memory.h
+  on_boot:
+    priority: -100
+    then:
+      - delay: 3s
+      # Ensure Multi-Target tracking is ON by default
+      - switch.turn_on: multi_target_switch
+
+esp32:
+  board: "${board}"
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  output_power: 8.5dB
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+ota:
+  platform: esphome
+
+# --------------------------------------------------------------------
+# 1. HARDWARE UART BUS FOR LD2450
+# --------------------------------------------------------------------
+uart:
+  id: radar_uart
+  tx_pin: ${tx_pin}
+  rx_pin: ${rx_pin}
+  baud_rate: 256000
+  parity: NONE
+  stop_bits: 1
+
+# --------------------------------------------------------------------
+# 2. LD2450 mmWAVE RADAR COMPONENT
+# --------------------------------------------------------------------
+ld2450:
+  id: ld2450_radar
+  uart_id: radar_uart
+
+# --------------------------------------------------------------------
+# 3. OCCUPANCY & ZONE BINARY SENSORS
+# --------------------------------------------------------------------
+binary_sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    has_target:
+      name: "Raw Radar Presence"
+      id: raw_room_occupancy
+      internal: true
+    has_moving_target:
+      name: "Moving Target"
+      id: room_moving_target
+      device_class: motion
+    has_still_target:
+      name: "Still Target"
+      id: room_still_target
+      device_class: occupancy
+
+  # Main Room Occupancy (Managed by Presence Memory Tracker)
+  - platform: template
+    name: "Occupancy"
+    id: room_occupancy
+    device_class: occupancy
+    icon: "mdi:motion-sensor"
+
+  # 4 Detection Zones (Managed by Presence Memory Tracker)
+  - platform: template
+    name: "Zone 1 Occupancy"
+    id: zone_1_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 2 Occupancy"
+    id: zone_2_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 3 Occupancy"
+    id: zone_3_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 4 Occupancy"
+    id: zone_4_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  # Diagnostics: Visual feedback when "Stationary Presence Memory" is holding the state
+  - platform: template
+    name: "Stationary Memory Active"
+    id: room_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 1 Memory Active"
+    id: z1_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 2 Memory Active"
+    id: z2_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 3 Memory Active"
+    id: z3_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 4 Memory Active"
+    id: z4_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+# --------------------------------------------------------------------
+# 4. TARGET COORDINATES, COUNTS & ZONE SENSORS
+# --------------------------------------------------------------------
+sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    target_count:
+      name: "Raw Radar Target Count"
+      id: raw_target_count
+      internal: true
+    still_target_count:
+      name: "Still Target Count"
+    moving_target_count:
+      name: "Moving Target Count"
+
+    # Target 1 (Primary human detected)
+    target_1:
+      x:
+        name: "Target 1 X"
+        id: t1_x
+        filters:
+          - throttle: 250ms
+      y:
+        name: "Target 1 Y"
+        id: t1_y
+        filters:
+          - throttle: 250ms
+      speed:
+        name: "Target 1 Speed"
+        id: t1_speed
+        filters:
+          - throttle: 500ms
+      angle:
+        name: "Target 1 Angle"
+        id: t1_angle
+        filters:
+          - throttle: 500ms
+      distance:
+        name: "Target 1 Distance"
+        id: t1_dist
+        filters:
+          - throttle: 250ms
+      resolution:
+        name: "Target 1 Resolution"
+        id: t1_res
+        filters:
+          - throttle: 1000ms
+
+    # Target 2
+    target_2:
+      x:
+        name: "Target 2 X"
+        id: t2_x
+        filters:
+          - throttle: 250ms
+      y:
+        name: "Target 2 Y"
+        id: t2_y
+        filters:
+          - throttle: 250ms
+      speed:
+        name: "Target 2 Speed"
+        id: t2_speed
+        filters:
+          - throttle: 500ms
+      angle:
+        name: "Target 2 Angle"
+        id: t2_angle
+        filters:
+          - throttle: 500ms
+      distance:
+        name: "Target 2 Distance"
+        id: t2_dist
+        filters:
+          - throttle: 250ms
+      resolution:
+        name: "Target 2 Resolution"
+        id: t2_res
+        filters:
+          - throttle: 1000ms
+
+    # Target 3
+    target_3:
+      x:
+        name: "Target 3 X"
+        id: t3_x
+        filters:
+          - throttle: 250ms
+      y:
+        name: "Target 3 Y"
+        id: t3_y
+        filters:
+          - throttle: 250ms
+      speed:
+        name: "Target 3 Speed"
+        id: t3_speed
+        filters:
+          - throttle: 500ms
+      angle:
+        name: "Target 3 Angle"
+        id: t3_angle
+        filters:
+          - throttle: 500ms
+      distance:
+        name: "Target 3 Distance"
+        id: t3_dist
+        filters:
+          - throttle: 250ms
+      resolution:
+        name: "Target 3 Resolution"
+        id: t3_res
+        filters:
+          - throttle: 1000ms
+
+  # Filtered People Counters (Synced with Presence Memory Tracker)
+  - platform: template
+    name: "Target Count"
+    id: active_target_count
+    icon: "mdi:account-group"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 1 Target Count"
+    id: z1_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 2 Target Count"
+    id: z2_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 3 Target Count"
+    id: z3_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 4 Target Count"
+    id: z4_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  # Diagnostics & Network
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "Uptime"
+
+# --------------------------------------------------------------------
+# 5. DIRECTION & DIAGNOSTIC TEXT SENSORS
+# --------------------------------------------------------------------
+text_sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    version:
+      name: "Radar Firmware Version"
+    mac_address:
+      name: "Radar MAC Address"
+    target_1:
+      direction:
+        name: "Target 1 Direction"
+    target_2:
+      direction:
+        name: "Target 2 Direction"
+    target_3:
+      direction:
+        name: "Target 3 Direction"
+
+  # Live Target Position & Zone Calibration Feedback
+  - platform: template
+    name: "Live Target Position"
+    id: live_target_position
+    icon: "mdi:crosshairs-gps"
+
+  - platform: template
+    name: "Zone Calibration Status"
+    id: zone_calibration_status
+    icon: "mdi:ruler-square"
+
+# --------------------------------------------------------------------
+# 6. CONFIGURATION NUMBERS & ZONE COORDINATES
+# --------------------------------------------------------------------
+number:
+  # Room Presence Timeout (Used when target physically exits the room)
+  # Plus Hardware Mask / Exclusion Zones 1-3 (stored in LD2450 NVRAM when Zone Type = Filter)
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    presence_timeout:
+      name: "Presence Timeout"
+      id: presence_timeout_num
+      mode: box
+    zone_1:
+      x1:
+        name: "Exclusion Zone 1 X1"
+        mode: box
+      y1:
+        name: "Exclusion Zone 1 Y1"
+        mode: box
+      x2:
+        name: "Exclusion Zone 1 X2"
+        mode: box
+      y2:
+        name: "Exclusion Zone 1 Y2"
+        mode: box
+    zone_2:
+      x1:
+        name: "Exclusion Zone 2 X1"
+        mode: box
+      y1:
+        name: "Exclusion Zone 2 Y1"
+        mode: box
+      x2:
+        name: "Exclusion Zone 2 X2"
+        mode: box
+      y2:
+        name: "Exclusion Zone 2 Y2"
+        mode: box
+    zone_3:
+      x1:
+        name: "Exclusion Zone 3 X1"
+        mode: box
+      y1:
+        name: "Exclusion Zone 3 Y1"
+        mode: box
+      x2:
+        name: "Exclusion Zone 3 X2"
+        mode: box
+      y2:
+        name: "Exclusion Zone 3 Y2"
+        mode: box
+
+  # Zone Off Delay / Hold Time when person physically leaves the zone
+  - platform: template
+    name: "Zone Off Delay"
+    id: zone_off_delay
+    entity_category: config
+    unit_of_measurement: "s"
+    icon: "mdi:timer-sand"
+    min_value: 0
+    max_value: 600
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 5
+
+  # Max Detection Distance Cutoff for the room
+  - platform: template
+    name: "Max Distance"
+    id: max_distance
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:signal-distance-variant"
+    min_value: 500
+    max_value: 7500
+    step: 100
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 6000
+
+  # Stationary Presence Memory Watchdog Timeout (Minutes before clearing if target vanished without exiting)
+  - platform: template
+    name: "Stationary Latch Timeout"
+    id: stationary_latch_timeout
+    entity_category: config
+    unit_of_measurement: "min"
+    icon: "mdi:clock-alert-outline"
+    min_value: 1
+    max_value: 120
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+
+  # Exit Trajectory Margin (Distance outside zone/perimeter required to confirm an exit movement)
+  - platform: template
+    name: "Exit Trajectory Margin"
+    id: exit_trajectory_margin
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:vector-difference"
+    min_value: 100
+    max_value: 1000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 400
+
+  # Calibration Box Padding (Expands zone box by X mm in each direction)
+  - platform: template
+    name: "Calibration Padding"
+    id: calibration_padding
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-expand-all"
+    min_value: 0
+    max_value: 1000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 200
+
+  # Sensor Installation / Mounting Yaw Angle (Rotates coordinate system to match room walls)
+  - platform: template
+    name: "Sensor Mounting Angle"
+    id: sensor_mounting_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:rotate-3d-variant"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Outer Room Boundary (Eliminates through-wall false triggers)
+  - platform: template
+    name: "Room Boundary Min X"
+    id: room_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:wall"
+    min_value: -10000
+    max_value: 10000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Room Boundary Min Y"
+    id: room_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:wall"
+    min_value: 0
+    max_value: 15000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Room Boundary Max X"
+    id: room_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:wall"
+    min_value: -10000
+    max_value: 10000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Room Boundary Max Y"
+    id: room_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:wall"
+    min_value: 0
+    max_value: 15000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Room Setup & Placement Dimensions (For one-touch boundary generation)
+  - platform: template
+    name: "Room Width"
+    id: room_width_input
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-expand-horizontal"
+    min_value: 500
+    max_value: 15000
+    step: 100
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 4000
+
+  - platform: template
+    name: "Room Depth"
+    id: room_depth_input
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-expand-vertical"
+    min_value: 500
+    max_value: 15000
+    step: 100
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 5000
+
+  - platform: template
+    name: "Sensor Wall Offset X"
+    id: sensor_wall_offset_x
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-left-right"
+    min_value: -10000
+    max_value: 10000
+    step: 50
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 1 Angle"
+    id: z1_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 2 Angle"
+    id: z2_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 3 Angle"
+    id: z3_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 4 Angle"
+    id: z4_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 1 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 1 X1"
+    id: z1_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 1 Y1"
+    id: z1_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 1 X2"
+    id: z1_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 1 Y2"
+    id: z1_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 2 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 2 X1"
+    id: z2_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 2 Y1"
+    id: z2_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 2 X2"
+    id: z2_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 2 Y2"
+    id: z2_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 3 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 3 X1"
+    id: z3_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 3 Y1"
+    id: z3_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 3 X2"
+    id: z3_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 3 Y2"
+    id: z3_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 4 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 4 X1"
+    id: z4_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 4 Y1"
+    id: z4_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 4 X2"
+    id: z4_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -4860
+    max_value: 4860
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 4 Y2"
+    id: z4_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 7560
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+# --------------------------------------------------------------------
+# 7. RADAR MODE SELECTORS & SWITCHES
+# --------------------------------------------------------------------
+select:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    zone_type:
+      name: "Hardware Exclusion Mode"
+    baud_rate:
+      name: "Radar Baud Rate"
+
+  - platform: template
+    name: "Zone to Calibrate"
+    id: calibrate_zone_select
+    icon: "mdi:vector-selection"
+    optimistic: true
+    options:
+      - "Zone 1"
+      - "Zone 2"
+      - "Zone 3"
+      - "Zone 4"
+      - "Room Boundary"
+    initial_option: "Zone 1"
+
+switch:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    multi_target:
+      name: "Multi Target Tracking"
+      id: multi_target_switch
+    bluetooth:
+      name: "Radar Bluetooth"
+
+  # Vanish Protection / Stationary Presence Memory Toggle
+  - platform: template
+    name: "Stationary Presence Memory"
+    id: vanish_protection_switch
+    icon: "mdi:brain"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+# --------------------------------------------------------------------
+# 8. RADAR & ONE-TOUCH ZONE CALIBRATION BUTTONS
+# --------------------------------------------------------------------
+button:
+  - platform: restart
+    name: "Restart ESP32"
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    restart:
+      name: "Restart Radar"
+    factory_reset:
+      name: "Factory Reset Radar"
+
+  - platform: template
+    name: "Set Zone Corner 1"
+    id: btn_set_corner_1
+    icon: "mdi:vector-point-select"
+    on_press:
+      - lambda: |-
+          int z_idx = id(calibrate_zone_select).active_index().value_or(0);
+          std::string sel = (z_idx == 4) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
+
+          float mount_yaw = id(sensor_mounting_angle).state;
+          bool radar_has_target = id(raw_room_occupancy).state;
+
+          auto setup_target = [&](esphome::presence_memory::TargetData &t,
+                                  esphome::sensor::Sensor *x_s,
+                                  esphome::sensor::Sensor *y_s,
+                                  esphome::sensor::Sensor *d_s,
+                                  esphome::sensor::Sensor *sp_s,
+                                  esphome::sensor::Sensor *a_s) {
+            float rx = x_s->state;
+            float ry = y_s->state;
+            t.dist = d_s->state;
+            t.speed = sp_s->state;
+            t.angle = a_s->state;
+
+            if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
+              esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
+            } else {
+              t.x = rx;
+              t.y = ry;
+            }
+
+            t.active = radar_has_target &&
+                       !std::isnan(t.dist) && t.dist > 0.0f &&
+                       !std::isnan(t.x) && !std::isnan(t.y);
+          };
+
+          esphome::presence_memory::TargetData cur_targets[3];
+          setup_target(cur_targets[0], id(t1_x), id(t1_y), id(t1_dist), id(t1_speed), id(t1_angle));
+          setup_target(cur_targets[1], id(t2_x), id(t2_y), id(t2_dist), id(t2_speed), id(t2_angle));
+          setup_target(cur_targets[2], id(t3_x), id(t3_y), id(t3_dist), id(t3_speed), id(t3_angle));
+
+          float x = 0, y = 0, dist = 0;
+          if (esphome::presence_memory::g_calibrator.get_active_position(cur_targets, x, y, dist)) {
+            esphome::presence_memory::g_calibrator.point_a[z_idx].x = x;
+            esphome::presence_memory::g_calibrator.point_a[z_idx].y = y;
+            esphome::presence_memory::g_calibrator.point_a[z_idx].set = true;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%s: Corner 1 captured at X=%.0f, Y=%.0f mm. Move to opposite corner & press Corner 2.", sel.c_str(), x, y);
+            id(zone_calibration_status).publish_state(buf);
+            ESP_LOGI("calibrator", "%s", buf);
+          } else {
+            id(zone_calibration_status).publish_state("No target detected! Stand/sit in the corner and try again.");
+          }
+
+  - platform: template
+    name: "Set Zone Corner 2"
+    id: btn_set_corner_2
+    icon: "mdi:vector-rectangle"
+    on_press:
+      - lambda: |-
+          int z_idx = id(calibrate_zone_select).active_index().value_or(0);
+          std::string sel = (z_idx == 4) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
+
+          if (!esphome::presence_memory::g_calibrator.point_a[z_idx].set) {
+            id(zone_calibration_status).publish_state("Please press 'Set Zone Corner 1' first!");
+            return;
+          }
+
+          float mount_yaw = id(sensor_mounting_angle).state;
+          bool radar_has_target = id(raw_room_occupancy).state;
+
+          auto setup_target = [&](esphome::presence_memory::TargetData &t,
+                                  esphome::sensor::Sensor *x_s,
+                                  esphome::sensor::Sensor *y_s,
+                                  esphome::sensor::Sensor *d_s,
+                                  esphome::sensor::Sensor *sp_s,
+                                  esphome::sensor::Sensor *a_s) {
+            float rx = x_s->state;
+            float ry = y_s->state;
+            t.dist = d_s->state;
+            t.speed = sp_s->state;
+            t.angle = a_s->state;
+
+            if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
+              esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
+            } else {
+              t.x = rx;
+              t.y = ry;
+            }
+
+            t.active = radar_has_target &&
+                       !std::isnan(t.dist) && t.dist > 0.0f &&
+                       !std::isnan(t.x) && !std::isnan(t.y);
+          };
+
+          esphome::presence_memory::TargetData cur_targets[3];
+          setup_target(cur_targets[0], id(t1_x), id(t1_y), id(t1_dist), id(t1_speed), id(t1_angle));
+          setup_target(cur_targets[1], id(t2_x), id(t2_y), id(t2_dist), id(t2_speed), id(t2_angle));
+          setup_target(cur_targets[2], id(t3_x), id(t3_y), id(t3_dist), id(t3_speed), id(t3_angle));
+
+          float x = 0, y = 0, dist = 0;
+          if (esphome::presence_memory::g_calibrator.get_active_position(cur_targets, x, y, dist)) {
+            float xa = esphome::presence_memory::g_calibrator.point_a[z_idx].x;
+            float ya = esphome::presence_memory::g_calibrator.point_a[z_idx].y;
+            float xb = x;
+            float yb = y;
+            float pad = id(calibration_padding).state;
+
+            float d = std::hypot(xa - xb, ya - yb);
+            if (d < 300.0f) {
+              char warn_buf[140];
+              snprintf(warn_buf, sizeof(warn_buf), "Warning: Corner 2 is only %.0fcm from Corner 1! Walk to the opposite corner and press again.", d / 10.0f);
+              id(zone_calibration_status).publish_state(warn_buf);
+              return;
+            }
+
+            auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
+              auto call = num->make_call();
+              call.set_value(val);
+              call.perform();
+            };
+
+            float min_x = 0, max_x = 0, min_y = 0, max_y = 0;
+
+            if (z_idx == 4) {
+              // Room Boundary (Axis-aligned outer perimeter)
+              min_x = std::min(xa, xb) - pad;
+              max_x = std::max(xa, xb) + pad;
+              min_y = std::max(0.0f, std::min(ya, yb) - pad);
+              max_y = std::max(ya, yb) + pad;
+              set_num(id(room_x1), min_x);
+              set_num(id(room_y1), min_y);
+              set_num(id(room_x2), max_x);
+              set_num(id(room_y2), max_y);
+            } else {
+              float z_angle = 0.0f;
+              if (z_idx == 0) z_angle = id(z1_angle).state;
+              else if (z_idx == 1) z_angle = id(z2_angle).state;
+              else if (z_idx == 2) z_angle = id(z3_angle).state;
+              else if (z_idx == 3) z_angle = id(z4_angle).state;
+
+              if (z_angle == 0.0f) {
+                min_x = std::min(xa, xb) - pad;
+                max_x = std::max(xa, xb) + pad;
+                min_y = std::max(0.0f, std::min(ya, yb) - pad);
+                max_y = std::max(ya, yb) + pad;
+              } else {
+                float mx = (xa + xb) * 0.5f;
+                float my = (ya + yb) * 0.5f;
+                float ua = 0, va = 0, ub = 0, vb = 0;
+                esphome::presence_memory::rotate_point(xa - mx, ya - my, -z_angle, ua, va);
+                esphome::presence_memory::rotate_point(xb - mx, yb - my, -z_angle, ub, vb);
+                float hw = std::max(fabsf(ua), fabsf(ub)) + pad;
+                float hh = std::max(fabsf(va), fabsf(vb)) + pad;
+                min_x = mx - hw;
+                max_x = mx + hw;
+                min_y = my - hh;
+                max_y = my + hh;
+              }
+
+              if (z_idx == 0) {
+                set_num(id(z1_x1), min_x); set_num(id(z1_y1), min_y);
+                set_num(id(z1_x2), max_x); set_num(id(z1_y2), max_y);
+              } else if (z_idx == 1) {
+                set_num(id(z2_x1), min_x); set_num(id(z2_y1), min_y);
+                set_num(id(z2_x2), max_x); set_num(id(z2_y2), max_y);
+              } else if (z_idx == 2) {
+                set_num(id(z3_x1), min_x); set_num(id(z3_y1), min_y);
+                set_num(id(z3_x2), max_x); set_num(id(z3_y2), max_y);
+              } else if (z_idx == 3) {
+                set_num(id(z4_x1), min_x); set_num(id(z4_y1), min_y);
+                set_num(id(z4_x2), max_x); set_num(id(z4_y2), max_y);
+              }
+            }
+
+            // Commit immediately to ESP32 physical flash storage
+            global_preferences->sync();
+
+            esphome::presence_memory::g_calibrator.point_a[z_idx].set = false;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%s set! X: [%.0f to %.0f], Y: [%.0f to %.0f] mm", sel.c_str(), min_x, max_x, min_y, max_y);
+            id(zone_calibration_status).publish_state(buf);
+            ESP_LOGI("calibrator", "%s", buf);
+          } else {
+            id(zone_calibration_status).publish_state("No target detected! Stand/sit in the corner and try again.");
+          }
+
+  - platform: template
+    name: "Clear Selected Zone"
+    id: btn_clear_zone
+    icon: "mdi:vector-selection-remove"
+    on_press:
+      - lambda: |-
+          int z_idx = id(calibrate_zone_select).active_index().value_or(0);
+          std::string sel = (z_idx == 4) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
+          esphome::presence_memory::g_calibrator.point_a[z_idx].set = false;
+          auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
+            auto call = num->make_call();
+            call.set_value(val);
+            call.perform();
+          };
+          if (z_idx == 0) { set_num(id(z1_x1), 0); set_num(id(z1_y1), 0); set_num(id(z1_x2), 0); set_num(id(z1_y2), 0); }
+          else if (z_idx == 1) { set_num(id(z2_x1), 0); set_num(id(z2_y1), 0); set_num(id(z2_x2), 0); set_num(id(z2_y2), 0); }
+          else if (z_idx == 2) { set_num(id(z3_x1), 0); set_num(id(z3_y1), 0); set_num(id(z3_x2), 0); set_num(id(z3_y2), 0); }
+          else if (z_idx == 3) { set_num(id(z4_x1), 0); set_num(id(z4_y1), 0); set_num(id(z4_x2), 0); set_num(id(z4_y2), 0); }
+          else if (z_idx == 4) { set_num(id(room_x1), 0); set_num(id(room_y1), 0); set_num(id(room_x2), 0); set_num(id(room_y2), 0); }
+          global_preferences->sync();
+          char buf[64];
+          snprintf(buf, sizeof(buf), "%s cleared (disabled).", sel.c_str());
+          id(zone_calibration_status).publish_state(buf);
+
+  - platform: template
+    name: "Apply Room Dimensions to Boundary"
+    id: btn_apply_room_dimensions
+    icon: "mdi:calculator-variant"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          float w = id(room_width_input).state;
+          float d = id(room_depth_input).state;
+          float off_x = id(sensor_wall_offset_x).state;
+          float yaw = id(sensor_mounting_angle).state;
+
+          float min_x = 0, max_x = 0, min_y = 0, max_y = 0;
+
+          if (fabsf(yaw - (-45.0f)) < 2.0f) {
+            // Front-Left corner angled 45° across room
+            min_x = 0.0f;
+            max_x = w;
+            min_y = 0.0f;
+            max_y = d;
+          } else if (fabsf(yaw - 45.0f) < 2.0f) {
+            // Front-Right corner angled 45° across room
+            min_x = -w;
+            max_x = 0.0f;
+            min_y = 0.0f;
+            max_y = d;
+          } else {
+            // Wall mount (center if off_x=0, or offset by off_x)
+            min_x = -(w * 0.5f + off_x);
+            max_x = +(w * 0.5f - off_x);
+            min_y = 0.0f;
+            max_y = d;
+          }
+
+          auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
+            auto call = num->make_call();
+            call.set_value(val);
+            call.perform();
+          };
+
+          set_num(id(room_x1), min_x);
+          set_num(id(room_x2), max_x);
+          set_num(id(room_y1), min_y);
+          set_num(id(room_y2), max_y);
+          global_preferences->sync();
+
+          char buf[128];
+          snprintf(buf, sizeof(buf), "Boundaries set: X=[%.0f, %.0f], Y=[%.0f, %.0f] mm", min_x, max_x, min_y, max_y);
+          id(zone_calibration_status).publish_state(buf);
+          ESP_LOGI("room_setup", "%s", buf);
+
+# --------------------------------------------------------------------
+# 9. REAL-TIME PRESENCE MEMORY & TRAJECTORY TRACKING ENGINE (100ms)
+# --------------------------------------------------------------------
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          static esphome::presence_memory::RoomTracker s_room;
+          static esphome::presence_memory::ZoneTracker s_zones[4];
+
+          esphome::presence_memory::TargetData targets[3];
+          bool radar_has_target = id(raw_room_occupancy).state;
+          float mount_yaw = id(sensor_mounting_angle).state;
+
+          auto setup_target = [&](esphome::presence_memory::TargetData &t,
+                                  esphome::sensor::Sensor *x_s,
+                                  esphome::sensor::Sensor *y_s,
+                                  esphome::sensor::Sensor *d_s,
+                                  esphome::sensor::Sensor *sp_s,
+                                  esphome::sensor::Sensor *a_s) {
+            float rx = x_s->state;
+            float ry = y_s->state;
+            t.dist = d_s->state;
+            t.speed = sp_s->state;
+            t.angle = a_s->state;
+
+            if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
+              esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
+            } else {
+              t.x = rx;
+              t.y = ry;
+            }
+
+            t.active = radar_has_target &&
+                       !std::isnan(t.dist) && t.dist > 0.0f &&
+                       !std::isnan(t.x) && !std::isnan(t.y);
+          };
+
+          setup_target(targets[0], id(t1_x), id(t1_y), id(t1_dist), id(t1_speed), id(t1_angle));
+          setup_target(targets[1], id(t2_x), id(t2_y), id(t2_dist), id(t2_speed), id(t2_angle));
+          setup_target(targets[2], id(t3_x), id(t3_y), id(t3_dist), id(t3_speed), id(t3_angle));
+
+          // Room boundary filter: Drop targets physically outside the room walls
+          float rx1 = id(room_x1).state, ry1 = id(room_y1).state;
+          float rx2 = id(room_x2).state, ry2 = id(room_y2).state;
+          bool has_room_boundary = !(rx1 == 0 && ry1 == 0 && rx2 == 0 && ry2 == 0);
+          if (has_room_boundary) {
+            float min_rx = std::min(rx1, rx2);
+            float max_rx = std::max(rx1, rx2);
+            float min_ry = std::min(ry1, ry2);
+            float max_ry = std::max(ry1, ry2);
+            for (int i = 0; i < 3; i++) {
+              if (targets[i].active) {
+                if (targets[i].x < min_rx || targets[i].x > max_rx ||
+                    targets[i].y < min_ry || targets[i].y > max_ry) {
+                  targets[i].active = false;
+                }
+              }
+            }
+          }
+
+          bool vanish_prot = id(vanish_protection_switch).state;
+          float latch_timeout_min = id(stationary_latch_timeout).state;
+          float exit_margin = id(exit_trajectory_margin).state;
+          float zone_hold = id(zone_off_delay).state;
+          float room_timeout = id(presence_timeout_num).state;
+          float max_d = id(max_distance).state;
+
+          // Update calibrator targets
+          esphome::presence_memory::g_calibrator.update_targets(targets);
+
+          // Update Live Target Position text sensor (every 400ms)
+          static uint32_t last_pos_pub = 0;
+          uint32_t now = millis();
+          if (now - last_pos_pub >= 400) {
+            last_pos_pub = now;
+            float cur_x = 0, cur_y = 0, cur_dist = 0;
+            if (esphome::presence_memory::g_calibrator.get_active_position(targets, cur_x, cur_y, cur_dist)) {
+              char pos_buf[80];
+              snprintf(pos_buf, sizeof(pos_buf), "X: %.0f mm, Y: %.0f mm (%.2fm)", cur_x, cur_y, cur_dist / 1000.0f);
+              if (!id(live_target_position).has_state() || id(live_target_position).state != pos_buf) {
+                id(live_target_position).publish_state(pos_buf);
+              }
+            } else {
+              if (!id(live_target_position).has_state() || id(live_target_position).state != "No Target") {
+                id(live_target_position).publish_state("No Target");
+              }
+            }
+          }
+
+          // 1. Zone 1 Tracker Update
+          s_zones[0].update(id(z1_x1).state, id(z1_y1).state, id(z1_x2).state, id(z1_y2).state, id(z1_angle).state,
+                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+          if (!id(zone_1_occupancy).has_state() || id(zone_1_occupancy).state != s_zones[0].occupied) {
+            id(zone_1_occupancy).publish_state(s_zones[0].occupied);
+          }
+          if (!id(z1_stationary_latched).has_state() || id(z1_stationary_latched).state != s_zones[0].latched) {
+            id(z1_stationary_latched).publish_state(s_zones[0].latched);
+          }
+          if (!id(z1_target_count).has_state() || id(z1_target_count).state != s_zones[0].target_count) {
+            id(z1_target_count).publish_state(s_zones[0].target_count);
+          }
+
+          // 2. Zone 2 Tracker Update
+          s_zones[1].update(id(z2_x1).state, id(z2_y1).state, id(z2_x2).state, id(z2_y2).state, id(z2_angle).state,
+                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+          if (!id(zone_2_occupancy).has_state() || id(zone_2_occupancy).state != s_zones[1].occupied) {
+            id(zone_2_occupancy).publish_state(s_zones[1].occupied);
+          }
+          if (!id(z2_stationary_latched).has_state() || id(z2_stationary_latched).state != s_zones[1].latched) {
+            id(z2_stationary_latched).publish_state(s_zones[1].latched);
+          }
+          if (!id(z2_target_count).has_state() || id(z2_target_count).state != s_zones[1].target_count) {
+            id(z2_target_count).publish_state(s_zones[1].target_count);
+          }
+
+          // 3. Zone 3 Tracker Update
+          s_zones[2].update(id(z3_x1).state, id(z3_y1).state, id(z3_x2).state, id(z3_y2).state, id(z3_angle).state,
+                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+          if (!id(zone_3_occupancy).has_state() || id(zone_3_occupancy).state != s_zones[2].occupied) {
+            id(zone_3_occupancy).publish_state(s_zones[2].occupied);
+          }
+          if (!id(z3_stationary_latched).has_state() || id(z3_stationary_latched).state != s_zones[2].latched) {
+            id(z3_stationary_latched).publish_state(s_zones[2].latched);
+          }
+          if (!id(z3_target_count).has_state() || id(z3_target_count).state != s_zones[2].target_count) {
+            id(z3_target_count).publish_state(s_zones[2].target_count);
+          }
+
+          // 4. Zone 4 Tracker Update
+          s_zones[3].update(id(z4_x1).state, id(z4_y1).state, id(z4_x2).state, id(z4_y2).state, id(z4_angle).state,
+                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+          if (!id(zone_4_occupancy).has_state() || id(zone_4_occupancy).state != s_zones[3].occupied) {
+            id(zone_4_occupancy).publish_state(s_zones[3].occupied);
+          }
+          if (!id(z4_stationary_latched).has_state() || id(z4_stationary_latched).state != s_zones[3].latched) {
+            id(z4_stationary_latched).publish_state(s_zones[3].latched);
+          }
+          if (!id(z4_target_count).has_state() || id(z4_target_count).state != s_zones[3].target_count) {
+            id(z4_target_count).publish_state(s_zones[3].target_count);
+          }
+
+          // 5. Room Tracker Update (Evaluated with room boundary and zone latches)
+          bool any_zone_latched = s_zones[0].latched || s_zones[1].latched || s_zones[2].latched || s_zones[3].latched;
+          s_room.update(targets, max_d, rx1, ry1, rx2, ry2, vanish_prot, room_timeout, latch_timeout_min, exit_margin, any_zone_latched);
+          if (!id(room_occupancy).has_state() || id(room_occupancy).state != s_room.occupied) {
+            id(room_occupancy).publish_state(s_room.occupied);
+          }
+          if (!id(room_stationary_latched).has_state() || id(room_stationary_latched).state != s_room.latched) {
+            id(room_stationary_latched).publish_state(s_room.latched);
+          }
+          if (!id(active_target_count).has_state() || id(active_target_count).state != s_room.target_count) {
+            id(active_target_count).publish_state(s_room.target_count);
+          }
+
+# --------------------------------------------------------------------
+# 10. ACTIVE BLUETOOTH PROXY (For Bermuda BLE Triangulation)
+# --------------------------------------------------------------------
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+bluetooth_proxy:
+  active: true
