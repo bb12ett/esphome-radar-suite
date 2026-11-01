@@ -158,37 +158,41 @@ sensor:
       name: "Moving Target Count"
 
     # Target 1 (Primary human detected)
+    # throttle_with_priority (default priority value: nan) limits Home Assistant traffic but always
+    # passes the single NAN the LD2450 driver publishes when a target slot clears. A plain
+    # `throttle` can swallow that NAN and leave a frozen "ghost" target behind.
+    # The on-device trackers read get_raw_state() so they still see every 10 Hz frame.
     target_1:
       x:
         name: "Target 1 X"
         id: t1_x
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       y:
         name: "Target 1 Y"
         id: t1_y
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       speed:
         name: "Target 1 Speed"
         id: t1_speed
         filters:
-          - throttle: 500ms
+          - throttle_with_priority: 500ms
       angle:
         name: "Target 1 Angle"
         id: t1_angle
         filters:
-          - throttle: 500ms
+          - throttle_with_priority: 500ms
       distance:
         name: "Target 1 Distance"
         id: t1_dist
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       resolution:
         name: "Target 1 Resolution"
         id: t1_res
         filters:
-          - throttle: 1000ms
+          - throttle_with_priority: 1000ms
 
     # Target 2
     target_2:
@@ -196,32 +200,32 @@ sensor:
         name: "Target 2 X"
         id: t2_x
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       y:
         name: "Target 2 Y"
         id: t2_y
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       speed:
         name: "Target 2 Speed"
         id: t2_speed
         filters:
-          - throttle: 500ms
+          - throttle_with_priority: 500ms
       angle:
         name: "Target 2 Angle"
         id: t2_angle
         filters:
-          - throttle: 500ms
+          - throttle_with_priority: 500ms
       distance:
         name: "Target 2 Distance"
         id: t2_dist
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       resolution:
         name: "Target 2 Resolution"
         id: t2_res
         filters:
-          - throttle: 1000ms
+          - throttle_with_priority: 1000ms
 
     # Target 3
     target_3:
@@ -229,32 +233,32 @@ sensor:
         name: "Target 3 X"
         id: t3_x
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       y:
         name: "Target 3 Y"
         id: t3_y
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       speed:
         name: "Target 3 Speed"
         id: t3_speed
         filters:
-          - throttle: 500ms
+          - throttle_with_priority: 500ms
       angle:
         name: "Target 3 Angle"
         id: t3_angle
         filters:
-          - throttle: 500ms
+          - throttle_with_priority: 500ms
       distance:
         name: "Target 3 Distance"
         id: t3_dist
         filters:
-          - throttle: 250ms
+          - throttle_with_priority: 250ms
       resolution:
         name: "Target 3 Resolution"
         id: t3_res
         filters:
-          - throttle: 1000ms
+          - throttle_with_priority: 1000ms
 
   # Filtered People Counters (Synced with Presence Memory Tracker)
   - platform: template
@@ -639,8 +643,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -654,7 +658,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -667,8 +671,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -682,7 +686,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -697,8 +701,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -712,7 +716,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -725,8 +729,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -740,7 +744,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -755,8 +759,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -770,7 +774,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -783,8 +787,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -798,7 +802,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -813,8 +817,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -828,7 +832,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-top-left"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -841,8 +845,8 @@ number:
     device_class: distance
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right-bold-box-outline"
-    min_value: -4860
-    max_value: 4860
+    min_value: -10000
+    max_value: 10000
     step: 10
     mode: box
     optimistic: true
@@ -856,7 +860,7 @@ number:
     unit_of_measurement: "mm"
     icon: "mdi:arrow-bottom-right"
     min_value: 0
-    max_value: 7560
+    max_value: 15000
     step: 10
     mode: box
     optimistic: true
@@ -936,11 +940,11 @@ button:
                                   esphome::sensor::Sensor *d_s,
                                   esphome::sensor::Sensor *sp_s,
                                   esphome::sensor::Sensor *a_s) {
-            float rx = x_s->state;
-            float ry = y_s->state;
-            t.dist = d_s->state;
-            t.speed = sp_s->state;
-            t.angle = a_s->state;
+            float rx = x_s->get_raw_state();
+            float ry = y_s->get_raw_state();
+            t.dist = d_s->get_raw_state();
+            t.speed = sp_s->get_raw_state();
+            t.angle = a_s->get_raw_state();
 
             if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
               esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
@@ -949,9 +953,10 @@ button:
               t.y = ry;
             }
 
-            t.active = radar_has_target &&
-                       !std::isnan(t.dist) && t.dist > 0.0f &&
-                       !std::isnan(t.x) && !std::isnan(t.y);
+            t.raw_active = radar_has_target &&
+                           !std::isnan(t.dist) && t.dist > 0.0f &&
+                           !std::isnan(t.x) && !std::isnan(t.y);
+            t.active = t.raw_active;
           };
 
           esphome::presence_memory::TargetData cur_targets[3];
@@ -995,11 +1000,11 @@ button:
                                   esphome::sensor::Sensor *d_s,
                                   esphome::sensor::Sensor *sp_s,
                                   esphome::sensor::Sensor *a_s) {
-            float rx = x_s->state;
-            float ry = y_s->state;
-            t.dist = d_s->state;
-            t.speed = sp_s->state;
-            t.angle = a_s->state;
+            float rx = x_s->get_raw_state();
+            float ry = y_s->get_raw_state();
+            t.dist = d_s->get_raw_state();
+            t.speed = sp_s->get_raw_state();
+            t.angle = a_s->get_raw_state();
 
             if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
               esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
@@ -1008,9 +1013,10 @@ button:
               t.y = ry;
             }
 
-            t.active = radar_has_target &&
-                       !std::isnan(t.dist) && t.dist > 0.0f &&
-                       !std::isnan(t.x) && !std::isnan(t.y);
+            t.raw_active = radar_has_target &&
+                           !std::isnan(t.dist) && t.dist > 0.0f &&
+                           !std::isnan(t.x) && !std::isnan(t.y);
+            t.active = t.raw_active;
           };
 
           esphome::presence_memory::TargetData cur_targets[3];
@@ -1035,6 +1041,8 @@ button:
             }
 
             auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
+              // Clamp to the entity's range so a write is never silently rejected
+              val = std::max(num->traits.get_min_value(), std::min(num->traits.get_max_value(), val));
               auto call = num->make_call();
               call.set_value(val);
               call.perform();
@@ -1074,7 +1082,7 @@ button:
                 float hh = std::max(fabsf(va), fabsf(vb)) + pad;
                 min_x = mx - hw;
                 max_x = mx + hw;
-                min_y = my - hh;
+                min_y = std::max(0.0f, my - hh);
                 max_y = my + hh;
               }
 
@@ -1119,10 +1127,10 @@ button:
             call.set_value(val);
             call.perform();
           };
-          if (z_idx == 0) { set_num(id(z1_x1), 0); set_num(id(z1_y1), 0); set_num(id(z1_x2), 0); set_num(id(z1_y2), 0); }
-          else if (z_idx == 1) { set_num(id(z2_x1), 0); set_num(id(z2_y1), 0); set_num(id(z2_x2), 0); set_num(id(z2_y2), 0); }
-          else if (z_idx == 2) { set_num(id(z3_x1), 0); set_num(id(z3_y1), 0); set_num(id(z3_x2), 0); set_num(id(z3_y2), 0); }
-          else if (z_idx == 3) { set_num(id(z4_x1), 0); set_num(id(z4_y1), 0); set_num(id(z4_x2), 0); set_num(id(z4_y2), 0); }
+          if (z_idx == 0) { set_num(id(z1_x1), 0); set_num(id(z1_y1), 0); set_num(id(z1_x2), 0); set_num(id(z1_y2), 0); set_num(id(z1_angle), 0); }
+          else if (z_idx == 1) { set_num(id(z2_x1), 0); set_num(id(z2_y1), 0); set_num(id(z2_x2), 0); set_num(id(z2_y2), 0); set_num(id(z2_angle), 0); }
+          else if (z_idx == 2) { set_num(id(z3_x1), 0); set_num(id(z3_y1), 0); set_num(id(z3_x2), 0); set_num(id(z3_y2), 0); set_num(id(z3_angle), 0); }
+          else if (z_idx == 3) { set_num(id(z4_x1), 0); set_num(id(z4_y1), 0); set_num(id(z4_x2), 0); set_num(id(z4_y2), 0); set_num(id(z4_angle), 0); }
           else if (z_idx == 4) { set_num(id(room_x1), 0); set_num(id(room_y1), 0); set_num(id(room_x2), 0); set_num(id(room_y2), 0); }
           global_preferences->sync();
           char buf[64];
@@ -1143,27 +1151,17 @@ button:
 
           float min_x = 0, max_x = 0, min_y = 0, max_y = 0;
 
-          if (fabsf(yaw - (-45.0f)) < 2.0f) {
-            // Front-Left corner angled 45° across room
-            min_x = 0.0f;
-            max_x = w;
-            min_y = 0.0f;
-            max_y = d;
-          } else if (fabsf(yaw - 45.0f) < 2.0f) {
-            // Front-Right corner angled 45° across room
-            min_x = -w;
-            max_x = 0.0f;
-            min_y = 0.0f;
-            max_y = d;
-          } else {
-            // Wall mount (center if off_x=0, or offset by off_x)
-            min_x = -(w * 0.5f + off_x);
-            max_x = +(w * 0.5f - off_x);
-            min_y = 0.0f;
-            max_y = d;
-          }
+          // Targets are rotated by the mounting angle before the boundary check, so the walls
+          // relative to the sensor are the same for every angle. The sensor sits on the front wall
+          // at (width/2 + offset_x). A true corner mount (offset = ±width/2) gives [0, w] or [-w, 0].
+          min_x = -(w * 0.5f + off_x);
+          max_x = +(w * 0.5f - off_x);
+          min_y = 0.0f;
+          max_y = d;
+          (void) yaw;
 
           auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
+            val = std::max(num->traits.get_min_value(), std::min(num->traits.get_max_value(), val));
             auto call = num->make_call();
             call.set_value(val);
             call.perform();
@@ -1200,11 +1198,11 @@ interval:
                                   esphome::sensor::Sensor *d_s,
                                   esphome::sensor::Sensor *sp_s,
                                   esphome::sensor::Sensor *a_s) {
-            float rx = x_s->state;
-            float ry = y_s->state;
-            t.dist = d_s->state;
-            t.speed = sp_s->state;
-            t.angle = a_s->state;
+            float rx = x_s->get_raw_state();
+            float ry = y_s->get_raw_state();
+            t.dist = d_s->get_raw_state();
+            t.speed = sp_s->get_raw_state();
+            t.angle = a_s->get_raw_state();
 
             if (mount_yaw != 0.0f && !std::isnan(rx) && !std::isnan(ry)) {
               esphome::presence_memory::rotate_point(rx, ry, mount_yaw, t.x, t.y);
@@ -1213,9 +1211,10 @@ interval:
               t.y = ry;
             }
 
-            t.active = radar_has_target &&
-                       !std::isnan(t.dist) && t.dist > 0.0f &&
-                       !std::isnan(t.x) && !std::isnan(t.y);
+            t.raw_active = radar_has_target &&
+                           !std::isnan(t.dist) && t.dist > 0.0f &&
+                           !std::isnan(t.x) && !std::isnan(t.y);
+            t.active = t.raw_active;
           };
 
           setup_target(targets[0], id(t1_x), id(t1_y), id(t1_dist), id(t1_speed), id(t1_angle));
@@ -1225,16 +1224,12 @@ interval:
           // Room boundary filter: Drop targets physically outside the room walls
           float rx1 = id(room_x1).state, ry1 = id(room_y1).state;
           float rx2 = id(room_x2).state, ry2 = id(room_y2).state;
-          bool has_room_boundary = !(rx1 == 0 && ry1 == 0 && rx2 == 0 && ry2 == 0);
-          if (has_room_boundary) {
-            float min_rx = std::min(rx1, rx2);
-            float max_rx = std::max(rx1, rx2);
-            float min_ry = std::min(ry1, ry2);
-            float max_ry = std::max(ry1, ry2);
+          esphome::presence_memory::RoomBounds room = esphome::presence_memory::make_room_bounds(rx1, ry1, rx2, ry2);
+          if (room.valid) {
             for (int i = 0; i < 3; i++) {
               if (targets[i].active) {
-                if (targets[i].x < min_rx || targets[i].x > max_rx ||
-                    targets[i].y < min_ry || targets[i].y > max_ry) {
+                if (targets[i].x < room.min_x || targets[i].x > room.max_x ||
+                    targets[i].y < room.min_y || targets[i].y > room.max_y) {
                   targets[i].active = false;
                 }
               }
@@ -1272,7 +1267,7 @@ interval:
 
           // 1. Zone 1 Tracker Update
           s_zones[0].update(id(z1_x1).state, id(z1_y1).state, id(z1_x2).state, id(z1_y2).state, id(z1_angle).state,
-                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
           if (!id(zone_1_occupancy).has_state() || id(zone_1_occupancy).state != s_zones[0].occupied) {
             id(zone_1_occupancy).publish_state(s_zones[0].occupied);
           }
@@ -1285,7 +1280,7 @@ interval:
 
           // 2. Zone 2 Tracker Update
           s_zones[1].update(id(z2_x1).state, id(z2_y1).state, id(z2_x2).state, id(z2_y2).state, id(z2_angle).state,
-                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
           if (!id(zone_2_occupancy).has_state() || id(zone_2_occupancy).state != s_zones[1].occupied) {
             id(zone_2_occupancy).publish_state(s_zones[1].occupied);
           }
@@ -1298,7 +1293,7 @@ interval:
 
           // 3. Zone 3 Tracker Update
           s_zones[2].update(id(z3_x1).state, id(z3_y1).state, id(z3_x2).state, id(z3_y2).state, id(z3_angle).state,
-                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
           if (!id(zone_3_occupancy).has_state() || id(zone_3_occupancy).state != s_zones[2].occupied) {
             id(zone_3_occupancy).publish_state(s_zones[2].occupied);
           }
@@ -1311,7 +1306,7 @@ interval:
 
           // 4. Zone 4 Tracker Update
           s_zones[3].update(id(z4_x1).state, id(z4_y1).state, id(z4_x2).state, id(z4_y2).state, id(z4_angle).state,
-                            targets, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
           if (!id(zone_4_occupancy).has_state() || id(zone_4_occupancy).state != s_zones[3].occupied) {
             id(zone_4_occupancy).publish_state(s_zones[3].occupied);
           }
@@ -1324,7 +1319,7 @@ interval:
 
           // 5. Room Tracker Update (Evaluated with room boundary and zone latches)
           bool any_zone_latched = s_zones[0].latched || s_zones[1].latched || s_zones[2].latched || s_zones[3].latched;
-          s_room.update(targets, max_d, rx1, ry1, rx2, ry2, vanish_prot, room_timeout, latch_timeout_min, exit_margin, any_zone_latched);
+          s_room.update(targets, max_d, room, vanish_prot, room_timeout, latch_timeout_min, exit_margin, any_zone_latched);
           if (!id(room_occupancy).has_state() || id(room_occupancy).state != s_room.occupied) {
             id(room_occupancy).publish_state(s_room.occupied);
           }

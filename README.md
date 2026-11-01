@@ -137,7 +137,7 @@ When mounting an LD2450 mmWave sensor off-center or in a corner at an angle, tar
 
 The suite implements real-time spatial transformations:
 
-$$\begin{pmatrix} X_{room} \\ Y_{room} \end{pmatrix} = \begin{pmatrix} S_x \\ S_y \end{pmatrix} + \begin{pmatrix} \cos\theta & \sin\theta \\ -\sin\theta & \cos\theta \end{pmatrix} \begin{pmatrix} X_{sensor} \\ Y_{sensor} \end{pmatrix}$$
+$$\begin{pmatrix} X_{room} \\ Y_{room} \end{pmatrix} = \begin{pmatrix} S_x \\ S_y \end{pmatrix} + \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix} \begin{pmatrix} X_{sensor} \\ Y_{sensor} \end{pmatrix}$$
 
 Where:
 - $S_x = \frac{\text{Room Width}}{2} + \text{Wall Offset X}$

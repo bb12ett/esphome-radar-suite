@@ -1,13 +1,13 @@
 /**
  * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
- * Version 1.5.1 - High-Precision mmWave Radar Suite
+ * Version 1.6.0 - High-Precision mmWave Radar Suite
  * 
  * Includes:
  * 1. <radar-map-card>         (Lovelace: custom:radar-map-card)
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.5.5";
+const CARD_VERSION = "1.6.0";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -93,10 +93,10 @@ class RadarEntityResolver {
   static resolve(hass, config = {}) {
     const cfg = config || {};
     const states = (hass && hass.states) || {};
+    const devs = RadarEntityResolver.getDevices(hass);
     let prefix = cfg.device || cfg.prefix || "";
-    
+
     if (!prefix) {
-      const devs = RadarEntityResolver.getDevices(hass);
       if (devs.length > 0) {
         prefix = devs[0].prefix;
       } else {
@@ -104,46 +104,72 @@ class RadarEntityResolver {
       }
     }
 
-    const allEntityIds = Object.keys(states);
-    const tokens = prefix.toLowerCase().split(/[_-\s]+/).filter(Boolean);
+    const matchedDev = devs.find(d => d.prefix === prefix || d.rawPrefix === prefix);
+    const canonicalPrefix = matchedDev ? matchedDev.prefix : prefix;
+    const rawPrefix = matchedDev ? matchedDev.rawPrefix : prefix;
 
-    const findEntity = (domain, key, fallbackPrefix = prefix) => {
-      // 1. Direct match with prefix
+    const allEntityIds = Object.keys(states);
+    const tokens = canonicalPrefix.toLowerCase().split(/[_-\s]+/).filter(Boolean);
+    const otherDevicePrefixes = new Set();
+    for (const d of devs) {
+      if (d.prefix !== canonicalPrefix && d.rawPrefix !== rawPrefix) {
+        otherDevicePrefixes.add(d.prefix);
+        otherDevicePrefixes.add(d.rawPrefix);
+      }
+    }
+
+    const findDirect = (domain, key, fallbackPrefix = canonicalPrefix) => {
+      if (rawPrefix && rawPrefix !== fallbackPrefix) {
+        const rawDirect = domain + "." + rawPrefix + "_" + key;
+        if (states[rawDirect]) return rawDirect;
+      }
       const direct = domain + "." + fallbackPrefix + "_" + key;
       if (states[direct]) return direct;
+      return null;
+    };
 
-      // 2. Token match where all device tokens exist in entity id and entity ends with _key
-      const regex = new RegExp("(?:^|[^a-z0-9])" + key + "$");
-      const candidates = allEntityIds.filter(id => {
-        if (!id.startsWith(domain + ".")) return false;
-        if (!regex.test(id)) return false;
-        // Avoid zone_1_x1 matching exclusion_zone_1_x1 unless key explicitly contains exclusion
-        if (key.startsWith("zone_") && id.includes("exclusion_" + key)) return false;
-        return tokens.every(tok => id.includes(tok));
-      });
+    const findEntity = (domain, key, fallbackPrefix = canonicalPrefix) => {
+      // 1. Direct match with rawPrefix (handles HA double-area prefixes) and canonicalPrefix
+      const exact = findDirect(domain, key, fallbackPrefix);
+      if (exact) return exact;
 
-      if (candidates.length > 0) {
-        candidates.sort((a, b) => a.length - b.length);
-        return candidates[0];
-      }
-
-      // 3. Fallback search: first token match
+      // 2. Token match where ALL device tokens exist as whole tokens in entity prefix,
+      // excluding entities belonging to any other discovered radar device.
       if (tokens.length > 0) {
-        const sigToken = tokens[0];
-        const partial = allEntityIds.find(id => {
-          if (!id.startsWith(domain + ".")) return false;
-          if (!regex.test(id)) return false;
+        const suffix = "_" + key;
+        const domainPrefix = domain + ".";
+        const candidates = allEntityIds.filter(id => {
+          if (!id.startsWith(domainPrefix) || !id.endsWith(suffix)) return false;
           if (key.startsWith("zone_") && id.includes("exclusion_" + key)) return false;
-          return id.includes(sigToken);
+          const entPrefix = id.slice(domainPrefix.length, id.length - suffix.length);
+          if (otherDevicePrefixes.has(entPrefix)) return false;
+          const entTokens = entPrefix.toLowerCase().split(/[_-\s]+/);
+          return tokens.every(tok => entTokens.includes(tok));
         });
-        if (partial) return partial;
+
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => a.length - b.length);
+          return candidates[0];
+        }
       }
 
-      return direct;
+      return domain + "." + fallbackPrefix + "_" + key;
+    };
+
+    const findFirstExisting = (domain, keys) => {
+      for (const k of keys) {
+        const exact = findDirect(domain, k);
+        if (exact) return exact;
+      }
+      for (const k of keys) {
+        const id = findEntity(domain, k);
+        if (states[id]) return id;
+      }
+      return findEntity(domain, keys[0]);
     };
 
     return {
-      prefix: prefix,
+      prefix: canonicalPrefix,
       // Target Tracking
       target1_x: findEntity("sensor", "target_1_x"),
       target1_y: findEntity("sensor", "target_1_y"),
@@ -166,11 +192,11 @@ class RadarEntityResolver {
       target3_distance: findEntity("sensor", "target_3_distance"),
       target3_resolution: findEntity("sensor", "target_3_resolution"),
 
-      target_count: findEntity("sensor", "target_count") || findEntity("sensor", "active_target_count"),
-      occupancy: findEntity("binary_sensor", "occupancy") || findEntity("binary_sensor", "room_occupancy"),
+      target_count: findFirstExisting("sensor", ["target_count", "active_target_count", "raw_target_count"]),
+      occupancy: findFirstExisting("binary_sensor", ["occupancy", "room_occupancy"]),
       moving_target: findEntity("binary_sensor", "moving_target"),
       still_target: findEntity("binary_sensor", "still_target"),
-      wifi_signal: findEntity("sensor", "wi_fi_signal"),
+      wifi_signal: findFirstExisting("sensor", ["wi_fi_signal", "wifi_signal", "rssi"]),
       uptime: findEntity("sensor", "uptime"),
 
       // Stationary latch / memory
@@ -309,21 +335,40 @@ class RoomGeometry {
     if (config && config.sensor_offset_x !== undefined) sensorOffsetX = parseFloat(config.sensor_offset_x);
     if (config && config.mounting_angle !== undefined) mountingAngle = parseFloat(config.mounting_angle);
 
-    // Compute Sensor Wall Coordinate (sx, sy) relative to room
-    let sx = roomWidth / 2 + sensorOffsetX;
-    let sy = 0; // Front wall (Y = 0)
+    // Compute Sensor Wall Coordinate (sx, sy) relative to room front-left corner (0, 0)
+    const cleanWidth = Math.max(1000, roomWidth);
+    const cleanDepth = Math.max(1000, roomDepth);
+    const sx = cleanWidth / 2 + sensorOffsetX;
+    const sy = 0; // Front wall (Y = 0)
 
     return {
       hasRoom: true,
-      roomWidth: Math.max(1000, roomWidth),
-      roomDepth: Math.max(1000, roomDepth),
-      sx: Math.max(0, Math.min(roomWidth, sx)),
+      roomWidth: cleanWidth,
+      roomDepth: cleanDepth,
+      sx: sx,
       sy: sy,
       angle: mountingAngle,
       sensorOffsetX: sensorOffsetX
     };
   }
 
+  // Frame 1 (raw LD2450 chip) -> Frame 2 (sensor-origin, room-wall-aligned)
+  // Matches ESPHome presence_memory::rotate_point(rx, ry, mount_yaw)
+  static rotateToRoomAligned(xr_mm, yr_mm, angleDeg = 0) {
+    if (!angleDeg) {
+      return { x: xr_mm, y: yr_mm };
+    }
+    const rad = (angleDeg * Math.PI) / 180.0;
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+    return {
+      x: xr_mm * cosA - yr_mm * sinA,
+      y: xr_mm * sinA + yr_mm * cosA
+    };
+  }
+
+  // Frame 1 (raw LD2450 chip) -> Frame 3 (SVG room coordinates)
+  // Used for raw live targets (T1..T3) and hardware exclusion masks (Mask 1..3)
   static transformPoint(xr_mm, yr_mm, geom, invertX = false, invertY = false) {
     let xr = xr_mm;
     let yr = yr_mm;
@@ -334,22 +379,15 @@ class RoomGeometry {
       return { x: xr, y: yr };
     }
 
-    // Matches ESPHome rotate_point formula:
-    // tx = xr * cos(rad) - yr * sin(rad)
-    // ty = xr * sin(rad) + yr * cos(rad)
-    const rad = (((geom.angle || 0)) * Math.PI) / 180.0;
-    const cosA = Math.cos(rad);
-    const sinA = Math.sin(rad);
-
-    const tx = xr * cosA - yr * sinA;
-    const ty = xr * sinA + yr * cosA;
-
+    const rot = this.rotateToRoomAligned(xr, yr, geom.angle || 0);
     return {
-      x: geom.sx + tx,
-      y: geom.sy + ty
+      x: geom.sx + rot.x,
+      y: geom.sy + rot.y
     };
   }
 
+  // Frame 2 (sensor-origin, ALREADY rotated by mount_yaw on ESP32) -> Frame 3 (SVG room coordinates)
+  // Used for Software Detection Zones (Zone 1..4): applies only local zone rotation zAngle + sensor wall translation!
   static transformZonePolygon(xr1, yr1, xr2, yr2, zAngle = 0, geom) {
     if (!geom) return [];
     const minX = Math.min(xr1, xr2);
@@ -381,7 +419,28 @@ class RoomGeometry {
       });
     }
 
-    // Transform zone corners relative to the sensor (translating and rotating with mount_yaw)
+    return corners.map(c => ({
+      x: geom.sx + c.x,
+      y: geom.sy + c.y
+    }));
+  }
+
+  // Frame 1 (raw unrotated LD2450 chip NVRAM) -> Frame 3 (SVG room coordinates)
+  // Used for Hardware Exclusion Masks (Mask 1..3), which the LD2450 chip evaluates before mount_yaw rotation.
+  static transformMaskPolygon(mx1, my1, mx2, my2, geom) {
+    if (!geom) return [];
+    const minX = Math.min(mx1, mx2);
+    const maxX = Math.max(mx1, mx2);
+    const minY = Math.min(my1, my2);
+    const maxY = Math.max(my1, my2);
+
+    const corners = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY }
+    ];
+
     return corners.map(c => this.transformPoint(c.x, c.y, geom));
   }
 
@@ -901,11 +960,13 @@ class RadarMapCard extends HTMLElement {
     // Geometry Calculation directly from ESP32 Sensor
     const geom = RoomGeometry.compute(this._config, ent, this._hass);
 
-    // Update SVG ViewBox and Room Clip based on room dimensions
+    // Update SVG ViewBox and Room Clip based on room dimensions (expands if sensor offset exceeds room wall)
     const svg = this.shadowRoot.getElementById("radarSvg");
     if (svg) {
       const margin = 500;
-      svg.setAttribute("viewBox", `${-margin} ${-margin} ${geom.roomWidth + margin * 2} ${geom.roomDepth + margin * 2}`);
+      const minVbX = Math.min(0, geom.sx) - margin;
+      const maxVbX = Math.max(geom.roomWidth, geom.sx) + margin;
+      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${maxVbX - minVbX} ${geom.roomDepth + margin * 2}`);
       const clipRect = this.shadowRoot.getElementById("radarRoomClipRect");
       if (clipRect) {
         clipRect.setAttribute("width", geom.roomWidth);
@@ -993,6 +1054,33 @@ class RadarMapCard extends HTMLElement {
       zonesLayer.innerHTML = zonesHtml;
     }
 
+    // Render Hardware Exclusion Masks (Frame 1 -> Frame 3)
+    const masksLayer = this.shadowRoot.getElementById("masksLayer");
+    if (masksLayer) {
+      const exclMode = getState(ent.exclusion_mode, "Filter");
+      let masksHtml = "";
+      if (exclMode !== "Disabled") {
+        for (let m = 1; m <= 3; m++) {
+          const mx1 = getVal(ent[`mask${m}_x1`]);
+          const my1 = getVal(ent[`mask${m}_y1`]);
+          const mx2 = getVal(ent[`mask${m}_x2`]);
+          const my2 = getVal(ent[`mask${m}_y2`]);
+          if (mx1 !== 0 || mx2 !== 0 || my1 !== 0 || my2 !== 0) {
+            const corners = RoomGeometry.transformMaskPolygon(mx1, my1, mx2, my2, geom);
+            const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+            masksHtml += `
+              <polygon points="${pts}" fill="rgba(239, 68, 68, 0.14)" stroke="#ef4444" stroke-width="10" stroke-dasharray="25,15" />
+              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="#ef4444"
+                    font-size="125" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                Mask ${m}
+              </text>
+            `;
+          }
+        }
+      }
+      masksLayer.innerHTML = masksHtml;
+    }
+
     // Render Targets & Motion Trails
     const targetsLayer = this.shadowRoot.getElementById("targetsLayer");
     const trailsLayer = this.shadowRoot.getElementById("trailsLayer");
@@ -1000,14 +1088,19 @@ class RadarMapCard extends HTMLElement {
     let trailsHtml = "";
 
     for (let t = 1; t <= 3; t++) {
-      const tx = getVal(ent[`target${t}_x`]);
-      const ty = getVal(ent[`target${t}_y`]);
-      const speed = getVal(ent[`target${t}_speed`]);
-      const dist = getVal(ent[`target${t}_distance`]);
+      const tx = getVal(ent[`target${t}_x`], NaN);
+      const ty = getVal(ent[`target${t}_y`], NaN);
+      const speed = getVal(ent[`target${t}_speed`], 0);
+      const dist = getVal(ent[`target${t}_distance`], 0);
       const elVal = this.shadowRoot.getElementById(`valT${t}`);
+      const isTargetActive = Number.isFinite(tx) && Number.isFinite(ty) && dist > 0;
 
-      if (ty > 0) {
+      if (isTargetActive) {
         const pt = RoomGeometry.transformPoint(tx, ty, geom);
+        const rotPt = RoomGeometry.rotateToRoomAligned(tx, ty, geom.angle || 0);
+        const speedEntity = states[ent[`target${t}_speed`]];
+        const speedUnit = (speedEntity && speedEntity.attributes && speedEntity.attributes.unit_of_measurement) || "mm/s";
+        const speedCmS = speedUnit === "mm/s" ? (speed / 10.0) : (speedUnit === "m/s" ? (speed * 100.0) : speed);
         
         // Update Trail
         this._trails[t].push(pt);
@@ -1030,7 +1123,7 @@ class RadarMapCard extends HTMLElement {
         `;
 
         if (elVal) {
-          elVal.textContent = `X:${Math.round(tx)} Y:${Math.round(ty)} (${Math.round(speed)}cm/s)`;
+          elVal.textContent = `X:${Math.round(rotPt.x)} Y:${Math.round(rotPt.y)} (${Math.round(speedCmS)}cm/s)`;
           elVal.style.color = targetColor;
         }
       } else {
@@ -1156,6 +1249,8 @@ class RadarCalibrationCard extends HTMLElement {
     this._selectedDevice = "";
     this._activeTab = "placement";
     this._selectedZone = 1;
+    this._zoneDirty = false;
+    this._lastSyncedZoneSig = "";
     this._toastMsg = "";
     this._toastTimeout = null;
     this._syncHandler = null;
@@ -1280,7 +1375,11 @@ class RadarCalibrationCard extends HTMLElement {
     if (!this._entities || !this._hass) return;
     const ent = this._entities;
     const states = this._hass.states;
-    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
 
     const rw = getVal(ent.room_width, 0) || Math.abs(getVal(ent.room_max_x, 2500) - getVal(ent.room_min_x, -2500)) || 4000;
     const rd = getVal(ent.room_depth, 0) || getVal(ent.room_max_y, 5000) || 5000;
@@ -1303,6 +1402,8 @@ class RadarCalibrationCard extends HTMLElement {
       sensorOffsetX: Math.round(off),
       mountingYaw: Math.round(yaw)
     };
+    this._zoneDirty = false;
+    this._lastRenderedZone = null;
 
     // Populate Tab 1 Inputs
     const selPreset = this.shadowRoot.getElementById("selPlacementPreset");
@@ -1321,11 +1422,11 @@ class RadarCalibrationCard extends HTMLElement {
       const el = this.shadowRoot.getElementById(id);
       if (el) el.value = val;
     };
-    setInp("inpMaxDistance", getVal(ent.max_distance, 600));
-    setInp("inpPresenceTimeout", getVal(ent.presence_timeout, 15));
+    setInp("inpMaxDistance", getVal(ent.max_distance, 6000));
+    setInp("inpPresenceTimeout", getVal(ent.presence_timeout, 5));
     setInp("inpZoneOffDelay", getVal(ent.zone_off_delay, 5));
     setInp("inpStationaryTimeout", getVal(ent.stationary_latch_timeout, 30));
-    setInp("inpExitMargin", getVal(ent.exit_trajectory_margin, 200));
+    setInp("inpExitMargin", getVal(ent.exit_trajectory_margin, 400));
 
     const chkStat = this.shadowRoot.getElementById("chkStationaryMemory");
     if (chkStat) chkStat.checked = (ent.stationary_memory_switch && states[ent.stationary_memory_switch] && states[ent.stationary_memory_switch].state === "on");
@@ -1333,7 +1434,12 @@ class RadarCalibrationCard extends HTMLElement {
     const chkMulti = this.shadowRoot.getElementById("chkMultiTarget");
     if (chkMulti) chkMulti.checked = (ent.multi_target && states[ent.multi_target] && states[ent.multi_target].state === "on");
 
-    // Populate Tab 3 Masks Inputs
+    // Populate Tab 3 Hardware Exclusion Mode & Mask Inputs
+    const selExcl = this.shadowRoot.getElementById("selExclusionMode");
+    if (selExcl) {
+      const curMode = (ent.exclusion_mode && states[ent.exclusion_mode]) ? states[ent.exclusion_mode].state : "Disabled";
+      selExcl.value = ["Disabled", "Filter", "Detection"].includes(curMode) ? curMode : "Disabled";
+    }
     for (let m = 1; m <= 3; m++) {
       setInp(`inpMask${m}_x1`, getVal(ent[`mask${m}_x1`]));
       setInp(`inpMask${m}_y1`, getVal(ent[`mask${m}_y1`]));
@@ -1890,9 +1996,9 @@ class RadarCalibrationCard extends HTMLElement {
             <div class="form-group">
               <label class="form-label">Hardware Exclusion Filter Mode</label>
               <select class="form-select" id="selExclusionMode">
-                <option value="Filter moving targets">Filter moving targets (fans, curtains)</option>
-                <option value="Filter still targets">Filter still targets</option>
-                <option value="Filter all targets">Filter all targets</option>
+                <option value="Disabled">Disabled (Masks inactive on radar chip)</option>
+                <option value="Filter">Filter (Ignore targets inside masks — fans, curtains)</option>
+                <option value="Detection">Detection (Only detect targets inside masks)</option>
               </select>
             </div>
           </div>
@@ -1924,7 +2030,7 @@ class RadarCalibrationCard extends HTMLElement {
           <div class="setting-row">
             <div class="setting-info">
               <div class="setting-title">Maximum Detection Distance</div>
-              <div class="setting-desc">Ignore all reflections and people beyond this distance (cm).</div>
+              <div class="setting-desc">Ignore all reflections and people beyond this distance (mm).</div>
             </div>
             <div class="setting-control">
               <input type="number" class="form-input" id="inpMaxDistance" style="width:90px;" />
@@ -2162,18 +2268,11 @@ class RadarCalibrationCard extends HTMLElement {
         if (this._entities.mounting_angle) this._setNumber(this._entities.mounting_angle, yaw);
 
         setTimeout(() => {
-          if (this._entities.apply_room_dimensions_btn) {
+          if (this._entities.apply_room_dimensions_btn && this._hass && this._hass.states[this._entities.apply_room_dimensions_btn]) {
             this._pressButton(this._entities.apply_room_dimensions_btn);
           } else {
-            let minX = 0, maxX = 0;
-            if (Math.abs(yaw - (-45)) < 2) {
-              minX = 0; maxX = rw;
-            } else if (Math.abs(yaw - 45) < 2) {
-              minX = -rw; maxX = 0;
-            } else {
-              minX = -(rw * 0.5 + off);
-              maxX = +(rw * 0.5 - off);
-            }
+            const minX = -(rw * 0.5 + off);
+            const maxX = +(rw * 0.5 - off);
             if (this._entities.room_min_x) this._setNumber(this._entities.room_min_x, minX);
             if (this._entities.room_max_x) this._setNumber(this._entities.room_max_x, maxX);
             if (this._entities.room_min_y) this._setNumber(this._entities.room_min_y, 0);
@@ -2201,12 +2300,15 @@ class RadarCalibrationCard extends HTMLElement {
 
         this._updateViewfinder();
 
+        if (this._entities.room_width) this._setNumber(this._entities.room_width, 6000);
+        if (this._entities.room_depth) this._setNumber(this._entities.room_depth, 6000);
+        if (this._entities.sensor_wall_offset_x) this._setNumber(this._entities.sensor_wall_offset_x, 0);
+        if (this._entities.mounting_angle) this._setNumber(this._entities.mounting_angle, 0);
         if (this._entities.room_min_x) this._setNumber(this._entities.room_min_x, -3000);
         if (this._entities.room_max_x) this._setNumber(this._entities.room_max_x, 3000);
         if (this._entities.room_min_y) this._setNumber(this._entities.room_min_y, 0);
         if (this._entities.room_max_y) this._setNumber(this._entities.room_max_y, 6000);
-        if (this._entities.mounting_angle) this._setNumber(this._entities.mounting_angle, 0);
-        this._showToast("Boundaries reset to default radar range.");
+        this._showToast("Boundaries reset to default 6000 × 6000 mm radar range.");
       });
     }
 
@@ -2263,6 +2365,15 @@ class RadarCalibrationCard extends HTMLElement {
       });
     }
 
+    const selExcl = this.shadowRoot.getElementById("selExclusionMode");
+    if (selExcl) {
+      selExcl.addEventListener("change", (e) => {
+        this._setSelect(this._entities.exclusion_mode, e.target.value);
+        this._showToast(`Hardware exclusion mode set to ${e.target.value}.`);
+        this._updateViewfinder();
+      });
+    }
+
     for (let m = 1; m <= 3; m++) {
       const btnSave = this.shadowRoot.getElementById(`btnSaveMask${m}`);
       if (btnSave) {
@@ -2271,11 +2382,16 @@ class RadarCalibrationCard extends HTMLElement {
           const y1 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_y1`).value) || 0;
           const x2 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_x2`).value) || 0;
           const y2 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_y2`).value) || 0;
+          const hasMask = (x1 !== 0 || y1 !== 0 || x2 !== 0 || y2 !== 0);
+          if (hasMask && selExcl && selExcl.value === "Disabled") {
+            selExcl.value = "Filter";
+            this._setSelect(this._entities.exclusion_mode, "Filter");
+          }
           this._setNumber(this._entities[`mask${m}_x1`], x1);
           this._setNumber(this._entities[`mask${m}_y1`], y1);
           this._setNumber(this._entities[`mask${m}_x2`], x2);
           this._setNumber(this._entities[`mask${m}_y2`], y2);
-          this._showToast(`Mask ${m} saved to hardware memory.`);
+          this._showToast(`Mask ${m} saved to LD2450 hardware memory.`);
           this._updateViewfinder();
         });
       }
@@ -2299,6 +2415,7 @@ class RadarCalibrationCard extends HTMLElement {
           this.shadowRoot.getElementById(`inpMask${m}_x2`).value = 0;
           this.shadowRoot.getElementById(`inpMask${m}_y2`).value = 0;
           this._showToast(`Mask ${m} cleared.`);
+          this._updateViewfinder();
         });
       }
     }
@@ -2314,7 +2431,7 @@ class RadarCalibrationCard extends HTMLElement {
     const yaw = this._formState.mountingYaw || 0;
 
     // Sensor position along the front wall: center is rw / 2, plus offset
-    const sx = Math.max(0, Math.min(rw, (rw / 2) + off));
+    const sx = (rw / 2) + off;
     const sy = 0;
 
     const previewGeom = {
@@ -2331,7 +2448,9 @@ class RadarCalibrationCard extends HTMLElement {
     const svg = this.shadowRoot.getElementById("viewfinderSvg");
     if (svg) {
       const margin = 500;
-      svg.setAttribute("viewBox", `${-margin} ${-margin} ${rw + margin * 2} ${rd + margin * 2}`);
+      const minVbX = Math.min(0, sx) - margin;
+      const maxVbX = Math.max(rw, sx) + margin;
+      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${maxVbX - minVbX} ${rd + margin * 2}`);
       const vfClipRect = this.shadowRoot.getElementById("vfRoomClipRect");
       if (vfClipRect) {
         vfClipRect.setAttribute("width", rw);
@@ -2380,7 +2499,11 @@ class RadarCalibrationCard extends HTMLElement {
     if (vfZones && this._entities && this._hass) {
       const ent = this._entities;
       const states = this._hass.states;
-      const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+      const getVal = (id, def = 0) => {
+        if (!id || !states[id]) return def;
+        const v = parseFloat(states[id].state);
+        return Number.isFinite(v) ? v : def;
+      };
       const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
       let zHtml = "";
@@ -2392,8 +2515,8 @@ class RadarCalibrationCard extends HTMLElement {
         let zAngle = getVal(ent[`zone${z}_angle`], 0);
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
 
-        // If user is currently editing manual inputs for selected zone, preview those live
-        if (z === this._selectedZone) {
+        // Preview unsaved manual input edits only when the user has modified the inputs (_zoneDirty)
+        if (z === this._selectedZone && this._zoneDirty) {
           const inX1 = this.shadowRoot.getElementById("inpZone_x1");
           const inY1 = this.shadowRoot.getElementById("inpZone_y1");
           const inX2 = this.shadowRoot.getElementById("inpZone_x2");
@@ -2431,12 +2554,18 @@ class RadarCalibrationCard extends HTMLElement {
       vfZones.innerHTML = zHtml;
     }
 
-    // 4b. Update Exclusion Masks inside Viewfinder
+    // 4b. Update Exclusion Masks inside Viewfinder (Frame 1 -> Frame 3 via transformMaskPolygon)
     const vfMasks = this.shadowRoot.getElementById("vfMasksLayer");
     if (vfMasks && this._entities && this._hass) {
       const ent = this._entities;
       const states = this._hass.states;
-      const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+      const getVal = (id, def = 0) => {
+        if (!id || !states[id]) return def;
+        const v = parseFloat(states[id].state);
+        return Number.isFinite(v) ? v : def;
+      };
+      const selExcl = this.shadowRoot.getElementById("selExclusionMode");
+      const exclMode = selExcl ? selExcl.value : ((ent.exclusion_mode && states[ent.exclusion_mode]) ? states[ent.exclusion_mode].state : "Filter");
 
       let mHtml = "";
       for (let m = 1; m <= 3; m++) {
@@ -2462,16 +2591,18 @@ class RadarCalibrationCard extends HTMLElement {
 
         const statusEl = this.shadowRoot.getElementById(`statusMask${m}`);
         const isConfigured = !(mx1 === 0 && mx2 === 0 && my1 === 0 && my2 === 0);
+        const isEnabled = isConfigured && exclMode !== "Disabled";
         if (statusEl) {
-          statusEl.textContent = isConfigured ? "🛡️ Active" : "Inactive";
-          statusEl.style.color = isConfigured ? "#ef4444" : "var(--text-muted)";
+          statusEl.textContent = isConfigured ? (exclMode === "Disabled" ? "⚠️ Mode Disabled" : `🛡️ ${exclMode}`) : "Inactive";
+          statusEl.style.color = isEnabled ? "#ef4444" : (isConfigured ? "#f59e0b" : "var(--text-muted)");
         }
 
         if (isConfigured) {
-          const corners = RoomGeometry.transformZonePolygon(mx1, my1, mx2, my2, 0, previewGeom);
+          const corners = RoomGeometry.transformMaskPolygon(mx1, my1, mx2, my2, previewGeom);
           const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+          const opacity = exclMode === "Disabled" ? "0.06" : "0.15";
           mHtml += `
-            <polygon points="${pts}" fill="rgba(239, 68, 68, 0.15)" stroke="#ef4444" stroke-width="12" stroke-dasharray="25,15" />
+            <polygon points="${pts}" fill="rgba(239, 68, 68, ${opacity})" stroke="#ef4444" stroke-width="12" stroke-dasharray="25,15" />
             <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="#ef4444"
                   font-size="130" font-weight="700" text-anchor="middle" dominant-baseline="middle">
               Mask ${m} 🛡️
@@ -2493,15 +2624,19 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
-    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
 
     let tHtml = "";
     for (let t = 1; t <= 3; t++) {
-      const tx = getVal(ent[`target${t}_x`]);
-      const ty = getVal(ent[`target${t}_y`]);
-      const dist = getVal(ent[`target${t}_distance`]);
+      const tx = getVal(ent[`target${t}_x`], NaN);
+      const ty = getVal(ent[`target${t}_y`], NaN);
+      const dist = getVal(ent[`target${t}_distance`], 0);
 
-      if (ty > 0) {
+      if (Number.isFinite(tx) && Number.isFinite(ty) && dist > 0) {
         const pt = RoomGeometry.transformPoint(tx, ty, previewGeom);
         const color = t === 1 ? "#38bdf8" : (t === 2 ? "#a855f7" : "#f59e0b");
 
@@ -2517,7 +2652,7 @@ class RadarCalibrationCard extends HTMLElement {
     vfTargets.innerHTML = tHtml;
   }
 
-  // Only updates live status badges & live telemetry — NEVER touches or overwrites form inputs!
+  // Only updates live status badges & live telemetry — NEVER overwrites active user typing!
   _updateLiveValues() {
     if (!this._hass || !this.shadowRoot) return;
     if (!this._entities) {
@@ -2532,7 +2667,11 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
-    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
     // Header Chips
@@ -2562,7 +2701,7 @@ class RadarCalibrationCard extends HTMLElement {
       chipWifi.textContent = `📶 ${wifi} dBm`;
     }
 
-    // Viewfinder is visible on ALL tabs! Update targets on all tabs:
+    // Viewfinder is visible on ALL tabs! Update targets & zone occupancy highlights on all tabs:
     const rw = Math.max(1000, this._formState.roomWidth || 4000);
     const rd = Math.max(1000, this._formState.roomDepth || 5000);
     const off = this._formState.sensorOffsetX || 0;
@@ -2571,7 +2710,7 @@ class RadarCalibrationCard extends HTMLElement {
       hasRoom: true,
       roomWidth: rw,
       roomDepth: rd,
-      sx: Math.max(0, Math.min(rw, (rw / 2) + off)),
+      sx: (rw / 2) + off,
       sy: 0,
       angle: yaw,
       sensorOffsetX: off
@@ -2589,7 +2728,11 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
-    const getVal = (id, def = 0) => (id && states[id]) ? parseFloat(states[id].state) || def : def;
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
     let cardsHtml = "";
@@ -2631,8 +2774,10 @@ class RadarCalibrationCard extends HTMLElement {
     grid.querySelectorAll(".zone-card").forEach(c => {
       c.addEventListener("click", () => {
         this._selectedZone = parseInt(c.dataset.zone, 10);
+        this._zoneDirty = false;
         this._setSelect(ent.zone_select, `Zone ${this._selectedZone}`);
         this._renderZoneCardsAndStepper();
+        this._updateViewfinder();
       });
     });
 
@@ -2645,8 +2790,15 @@ class RadarCalibrationCard extends HTMLElement {
     const isOcc = getState(ent[`zone${curZ}_occupancy`]) === "on";
 
     const t1Dist = getVal(ent.target1_distance, 0);
-    const t1X = getVal(ent.target1_x, 0);
-    const t1Y = getVal(ent.target1_y, 0);
+    const t1RawX = getVal(ent.target1_x, NaN);
+    const t1RawY = getVal(ent.target1_y, NaN);
+    const hasT1 = Number.isFinite(t1RawX) && Number.isFinite(t1RawY) && t1Dist > 0;
+    const t1Aligned = hasT1
+      ? RoomGeometry.rotateToRoomAligned(t1RawX, t1RawY, this._formState.mountingYaw || 0)
+      : { x: 0, y: 0 };
+
+    const rawCalStatus = (ent.zone_status && states[ent.zone_status]) ? states[ent.zone_status].state : "";
+    const calStatusMsg = (rawCalStatus && rawCalStatus !== "unknown" && rawCalStatus !== "unavailable") ? rawCalStatus : "";
 
     const stepPill = this.shadowRoot.getElementById("stepPill");
     const stepTitle = this.shadowRoot.getElementById("stepTitle");
@@ -2658,12 +2810,15 @@ class RadarCalibrationCard extends HTMLElement {
     stepPill.textContent = `Zone ${curZ}`;
     stepTitle.textContent = `Zone ${curZ} Calibration & Manual Coordinates`;
     stepInstr.innerHTML = `
-      Live Target Lock: <b>${t1Y > 0 ? `Target 1 detected at X:${Math.round(t1X)} Y:${Math.round(t1Y)} (${Math.round(t1Dist)}mm)` : "No targets in room — walk in to calibrate"}</b>
+      <div>Live Target Lock (Room-Aligned): <b>${hasT1 ? `Target 1 at X:${Math.round(t1Aligned.x)} Y:${Math.round(t1Aligned.y)} mm (${Math.round(t1Dist)}mm)` : "No targets in room — walk in to calibrate"}</b></div>
+      ${calStatusMsg ? `<div style="margin-top:6px; padding:6px 10px; border-radius:6px; background:rgba(56, 189, 248, 0.12); border:1px solid rgba(56, 189, 248, 0.3); color:#bae6fd; font-size:0.8rem;">📡 ${calStatusMsg}</div>` : ""}
     `;
 
     // Only re-build stepContent if zone selection changed to avoid interrupting manual input typing
     if (this._lastRenderedZone !== curZ) {
       this._lastRenderedZone = curZ;
+      this._zoneDirty = false;
+      this._lastSyncedZoneSig = `${curZ}:${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(angle)}`;
 
       stepContent.innerHTML = `
         <!-- Walk-in Wizard Buttons -->
@@ -2744,7 +2899,7 @@ class RadarCalibrationCard extends HTMLElement {
           this._setSelect(ent.zone_select, `Zone ${curZ}`);
           setTimeout(() => {
             this._pressButton(ent.btn_corner_1);
-            this._showToast(`📍 Corner 1 captured for Zone ${curZ}! Now walk to Corner 2.`);
+            this._showToast(`📍 Corner 1 command sent for Zone ${curZ}. Walk to Corner 2 next.`);
           }, 150);
         });
       }
@@ -2752,8 +2907,12 @@ class RadarCalibrationCard extends HTMLElement {
       const btnC2 = stepContent.querySelector("#btnCaptureCorner2");
       if (btnC2) {
         btnC2.addEventListener("click", () => {
-          this._pressButton(ent.btn_corner_2);
-          this._showToast(`✅ Corner 2 captured! Zone ${curZ} saved to ESP32 memory.`);
+          this._zoneDirty = false;
+          this._setSelect(ent.zone_select, `Zone ${curZ}`);
+          setTimeout(() => {
+            this._pressButton(ent.btn_corner_2);
+            this._showToast(`✅ Corner 2 command sent for Zone ${curZ}!`);
+          }, 150);
         });
       }
 
@@ -2761,13 +2920,21 @@ class RadarCalibrationCard extends HTMLElement {
       if (btnClr) {
         btnClr.addEventListener("click", () => {
           if (confirm(`Clear coordinates for Zone ${curZ}?`)) {
-            this._setSelect(ent.zone_select, `Zone ${curZ}`);
-            setTimeout(() => {
-              this._pressButton(ent.btn_clear_zone);
+            this._zoneDirty = false;
+            if (ent.btn_clear_zone && states[ent.btn_clear_zone]) {
+              this._setSelect(ent.zone_select, `Zone ${curZ}`);
+              setTimeout(() => {
+                this._pressButton(ent.btn_clear_zone);
+                this._showToast(`Zone ${curZ} cleared.`);
+              }, 150);
+            } else {
+              this._setNumber(ent[`zone${curZ}_x1`], 0);
+              this._setNumber(ent[`zone${curZ}_y1`], 0);
+              this._setNumber(ent[`zone${curZ}_x2`], 0);
+              this._setNumber(ent[`zone${curZ}_y2`], 0);
+              this._setNumber(ent[`zone${curZ}_angle`], 0);
               this._showToast(`Zone ${curZ} cleared.`);
-              this._lastRenderedZone = null;
-              this._renderZoneCardsAndStepper();
-            }, 150);
+            }
           }
         });
       }
@@ -2787,6 +2954,7 @@ class RadarCalibrationCard extends HTMLElement {
           this._setNumber(ent[`zone${curZ}_x2`], zx2);
           this._setNumber(ent[`zone${curZ}_y2`], zy2);
           this._setNumber(ent[`zone${curZ}_angle`], zang);
+          this._zoneDirty = false;
           this._showToast(`💾 Zone ${curZ} coordinates saved to ESP32!`);
           this._updateViewfinder();
         });
@@ -2797,6 +2965,7 @@ class RadarCalibrationCard extends HTMLElement {
         const input = stepContent.querySelector(`#${id}`);
         if (input) {
           input.addEventListener("input", () => {
+            this._zoneDirty = true;
             this._updateViewfinder();
           });
         }
@@ -2812,6 +2981,7 @@ class RadarCalibrationCard extends HTMLElement {
             const currentVal = parseFloat(input.value) || 0;
             const newVal = currentVal + delta;
             input.value = newVal;
+            this._zoneDirty = true;
             const entityId = ent[`zone${curZ}_${coord}`];
             this._setNumber(entityId, newVal);
             this._updateViewfinder();
@@ -2819,6 +2989,25 @@ class RadarCalibrationCard extends HTMLElement {
         });
       });
     } else {
+      // Sync ESP32 entity updates (e.g. walk-in Corner 2 capture or Clear) into inputs & viewfinder
+      // whenever the user is NOT actively typing unsaved edits
+      const newSig = `${curZ}:${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(angle)}`;
+      const activeId = (this.shadowRoot.activeElement && this.shadowRoot.activeElement.id) || "";
+      const isFocusedOnZoneInput = activeId.startsWith("inpZone_");
+      if (!this._zoneDirty && !isFocusedOnZoneInput && this._lastSyncedZoneSig !== newSig) {
+        this._lastSyncedZoneSig = newSig;
+        const setIfPresent = (id, v) => {
+          const el = stepContent.querySelector(`#${id}`);
+          if (el) el.value = Math.round(v);
+        };
+        setIfPresent("inpZone_x1", x1);
+        setIfPresent("inpZone_y1", y1);
+        setIfPresent("inpZone_x2", x2);
+        setIfPresent("inpZone_y2", y2);
+        setIfPresent("inpZone_angle", angle);
+        this._updateViewfinder();
+      }
+
       // Non-destructive update of status pill when not re-rendering
       const pill = stepContent.querySelector("#zoneLiveVerifPill");
       const box = stepContent.querySelector("#zoneLiveVerifBox");
@@ -2857,4 +3046,4 @@ if (!customElements.get("presence-calibration-card")) {
   customElements.define("presence-calibration-card", RadarCalibrationCard);
 }
 
-console.log("[PRESENCE-RADAR-CARDS] v1.5.5 High-Precision mmWave Radar Suite initialized.");
+console.log("[PRESENCE-RADAR-CARDS] v1.6.0 High-Precision mmWave Radar Suite initialized.");
