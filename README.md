@@ -39,7 +39,7 @@ Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps
 1. Open **HACS** in your Home Assistant UI.
 2. Click the three dots in the top right corner $\rightarrow$ **Custom repositories**.
 3. Paste the URL of this repository:
-   - **Repository**: `https://github.com/<your-username>/esphome-radar-suite`
+   - **Repository**: `https://github.com/bb12ett/esphome-radar-suite`
    - **Type**: `Dashboard` / `Lovelace`
 4. Click **Add**, find **ESPHome mmWave Radar Suite**, and click **Download**.
 5. Reload your browser.
