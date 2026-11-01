@@ -1,5 +1,6 @@
 # 📡 ESPHome mmWave Radar Suite for Home Assistant
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bb12ett&repository=esphome-radar-suite&category=plugin)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/default)
 [![ESPHome](https://img.shields.io/badge/ESPHome-2024.6+-orange.svg)](https://esphome.io)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg)](https://www.home-assistant.io)
@@ -35,7 +36,11 @@ Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps
 
 ## 🚀 Installation
 
-### Option 1: Via HACS (Recommended)
+### Option 1: One-Click Install via My Home Assistant (Recommended)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bb12ett&repository=esphome-radar-suite&category=plugin)
+
+### Option 2: Add Custom Repository in HACS
 1. Open **HACS** in your Home Assistant UI.
 2. Click the three dots in the top right corner $\rightarrow$ **Custom repositories**.
 3. Paste the URL of this repository:
@@ -44,7 +49,7 @@ Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps
 4. Click **Add**, find **ESPHome mmWave Radar Suite**, and click **Download**.
 5. Reload your browser.
 
-### Option 2: Manual Installation
+### Option 3: Manual Installation
 1. Download `presence-radar-card.js` from the [`dist/`](dist/presence-radar-card.js) directory.
 2. Copy `presence-radar-card.js` to your Home Assistant `config/www/plugins/` directory (create the directory if it doesn't exist).
 3. In Home Assistant, navigate to **Settings** $\rightarrow$ **Dashboards** $\rightarrow$ **Resources** (top right menu).
