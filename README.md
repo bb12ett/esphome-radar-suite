@@ -6,9 +6,9 @@
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An all-in-one, high-precision mmWave radar visualization and onboarding suite for **Home Assistant** and **ESPHome HLK-LD2450**.
+An all-in-one, high-precision mmWave radar visualization and calibration suite for **Home Assistant** and **ESPHome HLK-LD2450**.
 
-Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps. This suite provides real-time target tracking, architectural room boundary modeling with true mounting angle rotation, a walk-in auto-calibration wizard, manual coordinate entry with live map feedback, and hardware exclusion masks in a single, lightweight, zero-dependency bundle.
+This suite provides real-time multi-target tracking, true architectural room boundaries with mounting rotation, a walk-in calibration wizard, and flexible multi-mode software zones (detection and exclusion) in a clean, zero-dependency package.
 
 <p align="center">
   <img src="images/preview.png" alt="ESPHome mmWave Radar Suite Preview" width="100%" />
@@ -19,23 +19,21 @@ Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps
 ## 🌟 Key Features
 
 ### 1. 🎯 Real-Time Radar Map Card (`custom:radar-map-card`)
-- **60fps Native SVG Visualization**: Smoothly animates up to 3 simultaneous targets with speed, distance vectors, and motion trails.
-- **Architectural Room Coordinates**: Visualizes exact room width and depth with metric dimension labels.
-- **120° Physical Beam Angle**: Accurately renders physical radar coverage extending beyond walls.
-- **Corner & Offset Mount Geometry**: Automatically rotates and offsets targets and zones relative to the sensor’s wall offset and mounting yaw angle ($\theta$).
-- **Dual Display Modes**:
-  - `full`: Live radar map, active target telemetry cards (speed/distance), and zone occupancy badges.
-  - `minimal`: Clean, distraction-free radar map designed for overview dashboards or wall tablets.
-- **Dynamic Auto-Discovery**: Automatically discovers all LD2450 sensors in Home Assistant without manual YAML entity mapping.
+- **Live 2D Room Visualization**: Smoothly tracks up to 3 simultaneous targets with real-time distance, speed, and movement trails.
+- **True Room Dimensions**: Enter your room's width and depth to see realistic physical boundaries.
+- **Flexible Sensor Placement**: Mount your sensor centered, offset along a wall, or rotated in a corner (e.g. $45^\circ$) — targets and zones automatically align with your room.
+- **Dual Display Modes**: Choose between `full` (radar map, live target telemetry, and zone status badges) or `minimal` (clean map only for overview dashboards).
+- **Auto-Discovery**: Automatically finds and connects to any LD2450 sensor in your Home Assistant setup.
 
-### 2. 🛠️ Presence Calibration & Onboarding Suite (`custom:radar-calibration-card`)
-- **Persistent Live Viewfinder**: Real-time room map is pinned at the top across **all tabs**, giving instant visual feedback while editing.
-- **Walk-in Auto-Calibration**: Walk to Corner 1 $\rightarrow$ Click **Capture Corner 1** $\rightarrow$ Walk to Corner 2 $\rightarrow$ Click **Capture Corner 2 & Save**. The card calculates the bounding box and writes directly to ESP32 NVRAM.
-- **Manual Coordinate Entry & Nudges**: Direct numeric inputs for `X1`, `Y1`, `X2`, `Y2`, and `Angle (°)`, with quick $\pm50\text{mm}$ and $\pm5^\circ$ nudge buttons.
-- **Live Typing Feedback**: Typing new coordinates instantly moves and rotates the zone polygon on the map before saving.
-- **Multi-Mode Software Zones (Up to 10 Zones)**: Configure up to 10 independent zones, each selectable as **Detection Zone** (tracks occupants, presence memory & counts) or **Exclusion Mask** (ignores fans, robot vacuums, pets), rendered with dashed red hatching.
-- **Automatic Home Assistant Entity Visibility Sync**: Unused zone entities automatically collapse into the hidden entities section on the device page with zero integration reload or network downtime.
-- **Mobile Keyboard Preservation**: Designed with single-render state management so high-frequency 10Hz telemetry updates never close the mobile virtual keyboard or drop text focus.
+### 2. 🛠️ Presence Calibration Suite (`custom:radar-calibration-card`)
+- **Live Viewfinder**: Real-time room map stays pinned at the top across all tabs for instant visual feedback.
+- **Walk-in Calibration**: Walk to Corner 1 $\rightarrow$ Click **Capture Corner 1** $\rightarrow$ Walk to Corner 2 $\rightarrow$ Click **Capture Corner 2 & Save**. The card automatically calculates and saves the zone to your sensor.
+- **Multi-Mode Zones (Up to 10 Zones)**: Configure up to 10 independent zones. With a single click, set any zone to:
+  - 🟢 **Detection Zone**: Tracks room occupants, counts, and maintains stationary presence.
+  - 🔴 **Exclusion Mask**: Automatically ignores moving objects like ceiling fans, curtains, or robot vacuums so they don't trigger false occupancy.
+- **Configurable Active Zones & Clean Device Page**: Choose how many zones you want active (1–10). Inactive zones are automatically hidden in your Home Assistant device settings to keep things tidy, with zero reloads or disconnections.
+- **Manual Coordinate Tuning**: Direct inputs for `X1`, `Y1`, `X2`, `Y2`, and `Angle (°)`, with quick nudge buttons ($\pm50\text{mm}$, $\pm5^\circ$) and live preview before saving.
+- **Mobile-Friendly**: Updates smoothly in the background without dropping focus or closing your mobile keyboard.
 
 ---
 
@@ -56,11 +54,9 @@ Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps
 
 ### Option 3: Manual Installation
 1. Download `presence-radar-card.js` from the [`dist/`](dist/presence-radar-card.js) directory.
-2. Copy `presence-radar-card.js` to your Home Assistant `config/www/plugins/` directory (create the directory if it doesn't exist).
-3. In Home Assistant, navigate to **Settings** $\rightarrow$ **Dashboards** $\rightarrow$ **Resources** (top right menu).
-4. Click **Add Resource**:
-   - **URL**: `/local/plugins/presence-radar-card.js`
-   - **Resource type**: `JavaScript Module`
+2. Copy `presence-radar-card.js` to your Home Assistant `config/www/plugins/` directory.
+3. In Home Assistant, navigate to **Settings** $\rightarrow$ **Dashboards** $\rightarrow$ **Resources**.
+4. Add `/local/plugins/presence-radar-card.js` as a `JavaScript Module`.
 5. Refresh your browser (**Ctrl+Shift+R**).
 
 ---
@@ -87,7 +83,7 @@ layout_mode: full
 ```yaml
 type: custom:radar-map-card
 title: Home Radar Overview
-device: ""                         # Setting to "" enables "Select on drop-down"
+device: ""                         # Setting to "" enables device dropdown selector
 layout_mode: full
 ```
 
@@ -95,7 +91,7 @@ layout_mode: full
 ```yaml
 type: custom:radar-calibration-card
 title: Presence Onboarding Suite
-device: ""                         # Can onboard any room/sensor in the house from this single card!
+device: ""                         # Calibrate any sensor in your home from this card!
 ```
 
 ---
@@ -104,16 +100,12 @@ device: ""                         # Can onboard any room/sensor in the house fr
 
 The repository provides two ready-to-use ESPHome setups located in the [`esphome/`](esphome/) folder:
 
-### 1. Minimal Configuration (`ld2450_minimal.yaml`)
-For users who want basic target tracking and zone boundaries using the core ESPHome `ld2450` component without custom C++ code.
-- [View `esphome/ld2450_minimal.yaml`](esphome/ld2450_minimal.yaml)
-
-### 2. Full Onboarding Package (`ld2450_full.yaml`)
-The complete, production-grade package with:
-- **Stationary Presence Memory Tracker**: Vanish protection preventing lights from turning off when stationary.
-- **One-Touch Walk-In Zone Calibrator**: C++ corner calculation engine.
-- **4 Detection Zones & 3 Hardware Exclusion Masks**.
-- **Real-time Engine Parameters**: Zone hold times, latch timeouts, and exit trajectory margins.
+### 1. Full Package (`ld2450_full.yaml`) — Recommended
+The complete, production-grade package featuring:
+- **Stationary Presence Memory**: Prevents lights turning off when sitting completely still (e.g. reading, watching TV).
+- **Up to 10 Multi-Mode Zones**: Set each zone as a Detection Zone or Exclusion Mask.
+- **Walk-In Auto-Calibration**: Works seamlessly with the calibration card buttons.
+- **Tunable Engine Settings**: Adjustable presence timeouts, off-delays, and exit margins.
 
 #### How to include the Full Package:
 1. Place [`presence_memory.h`](esphome/presence_memory.h) and [`ld2450_full.yaml`](esphome/ld2450_full.yaml) into your ESPHome directory (e.g. `config/esphome/`).
@@ -130,29 +122,27 @@ packages:
   radar_base: !include ld2450_full.yaml
 ```
 
+### 2. Minimal Configuration (`ld2450_minimal.yaml`)
+For users who want basic tracking using the standard ESPHome component without custom C++ features.
+- [View `esphome/ld2450_minimal.yaml`](esphome/ld2450_minimal.yaml)
+
 ---
 
-## 📐 Sensor Installation Geometry & Math
+## 📐 Corner & Wall Placement
 
-When mounting an LD2450 mmWave sensor off-center or in a corner at an angle, target coordinates reported by the chip must be transformed into the room’s frame of reference.
+When mounting your sensor off-center or in a corner at an angle, target coordinates need to translate into your room's layout. 
 
-The suite implements real-time spatial transformations:
-
-$$\begin{pmatrix} X_{room} \\ Y_{room} \end{pmatrix} = \begin{pmatrix} S_x \\ S_y \end{pmatrix} + \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix} \begin{pmatrix} -X_{sensor} \\ Y_{sensor} \end{pmatrix}$$
-
-Where:
-- $S_x = \frac{\text{Room Width}}{2} + \text{Wall Offset X}$
-- $S_y = 0$ (Front mounting wall)
-- $\theta = \text{Sensor Mounting Yaw Angle}$
-
-This ensures that corner mounts (e.g. $45^\circ$ inward) correctly project detection zones and targets inside the room rather than outside the walls.
+The suite handles this automatically:
+- **Center Mount**: Sensor placed in the middle of a wall pointing into the room.
+- **Offset Mount**: Sensor placed anywhere along the wall; targets shift relative to the offset.
+- **Corner Mount (e.g. 45°)**: Mount in the corner looking diagonally across the room; both targets and detection zones rotate to stay inside your room boundaries.
 
 ---
 
 ## 🤖 Built with AI & Human Pair Programming
 
 > [!NOTE]
-> While I do write software, this suite was heavily co-developed and engineered using **Antigravity (Gemini 3.8 Flash and 4 Argon)**. From trigonometric spatial coordinate math and high-frequency SVG rendering to mobile-optimized DOM state management and ESPHome C++ tracking engines.
+> This suite was developed through collaborative pair programming with **Antigravity**.
 
 ---
 
