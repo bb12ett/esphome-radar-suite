@@ -1,13 +1,13 @@
 /**
  * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
- * Version 1.7.3 - High-Precision mmWave Radar Suite (Reactive Mode Toggle Fix)
+ * Version 1.7.4 - Interactive Popups & History (More-Info Dialogs, Zone Click, Engine Tab Restart Layout)
  * 
  * Includes:
  * 1. <radar-map-card>         (Lovelace: custom:radar-map-card)
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.7.3";
+const CARD_VERSION = "1.7.4";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -878,16 +878,36 @@ class RadarMapCard extends HTMLElement {
           font-weight: 600;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid var(--border-color);
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .chip:hover {
+          transform: translateY(-1px);
+          border-color: var(--primary-color);
+          background: rgba(255, 255, 255, 0.12);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+        .chip:active {
+          transform: translateY(0);
         }
         .chip.occupied {
           background: rgba(16, 185, 129, 0.15);
           border-color: rgba(16, 185, 129, 0.4);
           color: #34d399;
         }
+        .chip.occupied:hover {
+          background: rgba(16, 185, 129, 0.25);
+          border-color: #34d399;
+        }
         .chip.latched {
           background: rgba(168, 85, 247, 0.15);
           border-color: rgba(168, 85, 247, 0.4);
           color: #c084fc;
+        }
+        .chip.latched:hover {
+          background: rgba(168, 85, 247, 0.25);
+          border-color: #c084fc;
         }
         .map-viewport {
           position: relative;
@@ -914,6 +934,18 @@ class RadarMapCard extends HTMLElement {
           border: 1px solid var(--border-color);
           border-radius: 8px;
           padding: 8px 10px;
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .detail-card:hover {
+          transform: translateY(-1px);
+          border-color: var(--primary-color);
+          background: rgba(255, 255, 255, 0.08);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+        .detail-card:active {
+          transform: translateY(0);
         }
         .detail-title {
           font-size: 0.7rem;
@@ -941,6 +973,17 @@ class RadarMapCard extends HTMLElement {
           text-align: center;
           font-size: 0.72rem;
           font-weight: 600;
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+        }
+        .zone-pill:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+          filter: brightness(1.2);
+        }
+        .zone-pill:active {
+          transform: translateY(0);
         }
         .zone-pill.active {
           background: rgba(56, 189, 248, 0.15);
@@ -967,6 +1010,24 @@ class RadarMapCard extends HTMLElement {
           border-color: #ef4444;
           color: #fecaca;
           font-weight: 700;
+        }
+        .zone-polygon-group {
+          cursor: pointer;
+        }
+        .zone-polygon-group polygon {
+          pointer-events: all;
+          transition: stroke-width 0.2s ease, filter 0.2s ease;
+        }
+        .zone-polygon-group text {
+          pointer-events: none;
+        }
+        .zone-polygon-group:hover polygon {
+          stroke-width: 22px;
+          filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.8));
+        }
+        .zone-polygon-group.exclusion:hover polygon {
+          stroke-width: 22px;
+          filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.8));
         }
       </style>
 
@@ -1066,6 +1127,56 @@ class RadarMapCard extends HTMLElement {
         this._update();
       });
     }
+
+    const chipsBar = this.shadowRoot.getElementById("chipsBar");
+    if (chipsBar) {
+      chipsBar.addEventListener("click", (e) => {
+        const chip = e.target.closest(".chip");
+        if (!chip) return;
+        const entityId = chip.dataset?.entity || chip.getAttribute("data-entity");
+        if (entityId) this._openMoreInfo(entityId);
+      });
+    }
+
+    const zonesRow = this.shadowRoot.getElementById("zonesRow");
+    if (zonesRow) {
+      zonesRow.addEventListener("click", (e) => {
+        const pill = e.target.closest(".zone-pill");
+        if (!pill) return;
+        const entityId = pill.dataset?.entity || pill.getAttribute("data-entity");
+        if (entityId) this._openMoreInfo(entityId);
+      });
+    }
+
+    const zonesLayer = this.shadowRoot.getElementById("zonesLayer");
+    if (zonesLayer) {
+      zonesLayer.addEventListener("click", (e) => {
+        const grp = e.target.closest(".zone-polygon-group");
+        if (!grp) return;
+        const entityId = grp.dataset?.entity || grp.getAttribute("data-entity");
+        if (entityId) this._openMoreInfo(entityId);
+      });
+    }
+
+    const detailsGrid = this.shadowRoot.getElementById("targetsDetailsGrid");
+    if (detailsGrid) {
+      detailsGrid.addEventListener("click", (e) => {
+        const card = e.target.closest(".detail-card");
+        if (!card) return;
+        const entityId = card.dataset?.entity || card.getAttribute("data-entity");
+        if (entityId) this._openMoreInfo(entityId);
+      });
+    }
+  }
+
+  _openMoreInfo(entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      bubbles: true,
+      composed: true,
+      cancelable: true,
+      detail: { entityId }
+    }));
   }
 
   _update() {
@@ -1093,12 +1204,16 @@ class RadarMapCard extends HTMLElement {
     if (chipOcc) {
       chipOcc.className = "chip " + (occ ? "occupied" : "");
       chipOcc.textContent = occ ? "🟢 Occupied" : "⚪ Clear";
+      chipOcc.dataset.entity = ent.occupancy || "";
+      chipOcc.title = ent.occupancy ? `Click to view history (${ent.occupancy})` : "Occupancy";
     }
 
     const tc = getVal(ent.target_count, 0);
     const chipTc = this.shadowRoot.getElementById("chipTargets");
     if (chipTc) {
       chipTc.textContent = `🎯 ${tc} Target${tc === 1 ? "" : "s"}`;
+      chipTc.dataset.entity = ent.target_count || "";
+      chipTc.title = ent.target_count ? `Click to view history (${ent.target_count})` : "Target Count";
     }
 
     const latched = getState(ent.stationary_memory_active, "off") === "on";
@@ -1106,12 +1221,16 @@ class RadarMapCard extends HTMLElement {
     if (chipLatch) {
       chipLatch.style.display = latched ? "inline-flex" : "none";
       chipLatch.className = "chip latched";
+      chipLatch.dataset.entity = ent.stationary_memory_active || "";
+      chipLatch.title = ent.stationary_memory_active ? `Click to view history (${ent.stationary_memory_active})` : "Stationary Latch";
     }
 
     const wifi = states[ent.wifi_signal] ? states[ent.wifi_signal].state : "--";
     const chipWifi = this.shadowRoot.getElementById("chipWifi");
     if (chipWifi) {
       chipWifi.textContent = `📶 ${wifi} dBm`;
+      chipWifi.dataset.entity = ent.wifi_signal || "";
+      chipWifi.title = ent.wifi_signal ? `Click to view history (${ent.wifi_signal})` : "Wi-Fi Signal";
     }
 
     // Geometry Calculation directly from ESP32 Sensor
@@ -1187,12 +1306,13 @@ class RadarMapCard extends HTMLElement {
         const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
         const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
+        const zEntity = ent[`zone${z}_occupancy`] || "";
 
         const cls = "zone-pill" +
                     (isExcl ? " exclusion" : "") +
                     (isConfigured ? (zOcc ? " occupied" : " active") : "");
         const label = `Z${z}${isExcl ? " (Mask)" : ""}${zOcc ? (isExcl ? " ⚠️" : " (OCC)") : ""}`;
-        pillsHtml += `<div class="${cls}" id="pillZ${z}">${label}</div>`;
+        pillsHtml += `<div class="${cls}" id="pillZ${z}" data-entity="${zEntity}" title="${zEntity ? `Click to view Zone ${z} history (${zEntity})` : `Zone ${z}`}">${label}</div>`;
       }
       zonesRow.innerHTML = pillsHtml;
     }
@@ -1208,6 +1328,7 @@ class RadarMapCard extends HTMLElement {
         const zAngle = getVal(ent[`zone${z}_angle`], 0);
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
         const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
+        const zEntity = ent[`zone${z}_occupancy`] || "";
 
         if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
           const corners = RoomGeometry.transformZonePolygon(x1, y1, x2, y2, zAngle, geom);
@@ -1217,21 +1338,27 @@ class RadarMapCard extends HTMLElement {
             const stroke = zOcc ? "#ef4444" : "#f87171";
             const fill = zOcc ? "rgba(239, 68, 68, 0.35)" : "url(#exclusionHatch)";
             zonesHtml += `
-              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="25,15" />
-              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
-                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-                Zone ${z} (Mask)${zOcc ? " ⚠️" : ""}
-              </text>
+              <g class="zone-polygon-group exclusion" data-zone="${z}" data-entity="${zEntity}">
+                <title>${zEntity ? `Zone ${z} (Mask) - Click to view history (${zEntity})` : `Zone ${z} (Mask)`}</title>
+                <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="25,15" />
+                <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                      font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                  Zone ${z} (Mask)${zOcc ? " ⚠️" : ""}
+                </text>
+              </g>
             `;
           } else {
             const stroke = zOcc ? "#10b981" : "#38bdf8";
             const fill = zOcc ? "rgba(16, 185, 129, 0.25)" : "rgba(56, 189, 248, 0.1)";
             zonesHtml += `
-              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="${zOcc ? "none" : "30,15"}" />
-              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
-                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-                Zone ${z}${zOcc ? " 👤" : ""}
-              </text>
+              <g class="zone-polygon-group" data-zone="${z}" data-entity="${zEntity}">
+                <title>${zEntity ? `Zone ${z} - Click to view history (${zEntity})` : `Zone ${z}`}</title>
+                <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="${zOcc ? "none" : "30,15"}" />
+                <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                      font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                  Zone ${z}${zOcc ? " 👤" : ""}
+                </text>
+              </g>
             `;
           }
         }
@@ -1293,6 +1420,13 @@ class RadarMapCard extends HTMLElement {
           elVal.textContent = "Inactive";
           elVal.style.color = "var(--text-muted)";
         }
+      }
+
+      const cardVal = this.shadowRoot.querySelectorAll(".detail-card")[t - 1];
+      if (cardVal) {
+        const distEntity = ent[`target${t}_distance`];
+        cardVal.dataset.entity = distEntity || "";
+        cardVal.title = distEntity ? `Click to view Target ${t} history (${distEntity})` : `Target ${t}`;
       }
     }
 
@@ -1522,6 +1656,16 @@ class RadarCalibrationCard extends HTMLElement {
     this._callService("button", "press", { entity_id: entityId });
   }
 
+  _openMoreInfo(entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      bubbles: true,
+      composed: true,
+      cancelable: true,
+      detail: { entityId }
+    }));
+  }
+
   _setSelect(entityId, option) {
     if (!entityId || !this._hass || !this._hass.states[entityId]) return;
     this._callService("select", "select_option", { entity_id: entityId, option: option });
@@ -1732,16 +1876,36 @@ class RadarCalibrationCard extends HTMLElement {
           font-weight: 600;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid var(--border-color);
+          cursor: pointer;
+          user-select: none;
+          transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .chip:hover {
+          transform: translateY(-1px);
+          border-color: var(--primary-color);
+          background: rgba(255, 255, 255, 0.12);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+        .chip:active {
+          transform: translateY(0);
         }
         .chip.occupied {
           background: rgba(16, 185, 129, 0.15);
           border-color: rgba(16, 185, 129, 0.4);
           color: #34d399;
         }
+        .chip.occupied:hover {
+          background: rgba(16, 185, 129, 0.25);
+          border-color: #34d399;
+        }
         .chip.latched {
           background: rgba(168, 85, 247, 0.15);
           border-color: rgba(168, 85, 247, 0.4);
           color: #c084fc;
+        }
+        .chip.latched:hover {
+          background: rgba(168, 85, 247, 0.25);
+          border-color: #c084fc;
         }
         .tabs-nav {
           display: flex;
@@ -1901,6 +2065,22 @@ class RadarCalibrationCard extends HTMLElement {
           overflow: hidden;
           margin: 12px 0;
         }
+        .vf-zone-group {
+          cursor: pointer;
+        }
+        .vf-zone-group polygon {
+          pointer-events: all;
+          transition: stroke-width 0.2s ease, filter 0.2s ease;
+        }
+        .vf-zone-group text {
+          pointer-events: none;
+        }
+        .vf-zone-group:hover polygon {
+          filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.8));
+        }
+        .vf-zone-group.exclusion:hover polygon {
+          filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.8));
+        }
         .zones-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2054,16 +2234,15 @@ class RadarCalibrationCard extends HTMLElement {
               <div class="card-title">${this._config.title || "Presence Onboarding & Calibration Suite"}</div>
             </div>
 
-            <div class="device-selector-wrapper">
-              <select id="activeDeviceSelect" class="device-select" style="${hasPinnedDevice ? "display: none;" : ""}">
+            <div class="device-selector-wrapper" style="${hasPinnedDevice ? "display: none;" : ""}">
+              <select id="activeDeviceSelect" class="device-select">
                 ${devices.map(d => `<option value="${d.prefix}" ${this._selectedDevice === d.prefix ? "selected" : ""}>${d.name}</option>`).join("")}
               </select>
-              <button class="btn-restart" id="btnRestartSensor" title="Reboot ESP32 Node">🔄 Restart</button>
             </div>
           </div>
 
           <!-- Diagnostic Chips -->
-          <div class="chips-bar">
+          <div class="chips-bar" id="calChipsBar">
             <div class="chip" id="chipCalOcc">⚪ Clear</div>
             <div class="chip" id="chipCalTargets">🎯 0 Targets</div>
             <div class="chip" id="chipCalLatch" style="display:none;">🧠 Latched</div>
@@ -2261,8 +2440,9 @@ class RadarCalibrationCard extends HTMLElement {
           </div>
 
           <div class="action-row" style="margin-top:20px;">
-            <button class="btn-primary" id="btnRestartRadarChip">🔄 Restart Radar Module</button>
-            <button class="btn-danger" id="btnFactoryResetRadar">⚠️ Factory Reset Radar</button>
+            <button class="btn-secondary" id="btnRestartSensor" title="Reboot ESP32 Node">🔄 Restart ESP32</button>
+            <button class="btn-primary" id="btnRestartRadarChip" title="Restart LD2450 Radar Module">🔄 Restart Radar Module</button>
+            <button class="btn-danger" id="btnFactoryResetRadar" title="Factory Reset LD2450">⚠️ Factory Reset Radar</button>
           </div>
         </div>
       </ha-card>
@@ -2297,6 +2477,26 @@ class RadarCalibrationCard extends HTMLElement {
           this._pressButton(this._entities.restart_esp);
           this._showToast("Restart command sent to ESP32 node.");
         }
+      });
+    }
+
+    const calChipsBar = this.shadowRoot.getElementById("calChipsBar");
+    if (calChipsBar) {
+      calChipsBar.addEventListener("click", (e) => {
+        const chip = e.target.closest(".chip");
+        if (!chip) return;
+        const entityId = chip.dataset?.entity || chip.getAttribute("data-entity");
+        if (entityId) this._openMoreInfo(entityId);
+      });
+    }
+
+    const vfZones = this.shadowRoot.getElementById("vfZonesLayer");
+    if (vfZones) {
+      vfZones.addEventListener("click", (e) => {
+        const grp = e.target.closest(".vf-zone-group");
+        if (!grp) return;
+        const entityId = grp.dataset?.entity || grp.getAttribute("data-entity");
+        if (entityId) this._openMoreInfo(entityId);
       });
     }
 
@@ -2674,26 +2874,33 @@ class RadarCalibrationCard extends HTMLElement {
         if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
           const corners = RoomGeometry.transformZonePolygon(x1, y1, x2, y2, zAngle, previewGeom);
           const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+          const zEntity = ent[`zone${z}_occupancy`] || "";
 
           if (isExcl) {
             const stroke = z === this._selectedZone ? "#f59e0b" : (zOcc ? "#ef4444" : "#f87171");
             const fill = z === this._selectedZone ? "rgba(245, 158, 11, 0.2)" : (zOcc ? "rgba(239, 68, 68, 0.35)" : "url(#vfExclusionHatch)");
             zHtml += `
-              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" stroke-dasharray="25,15" />
-              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
-                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-                Zone ${z} (Mask)${zOcc ? " ⚠️" : ""}
-              </text>
+              <g class="vf-zone-group exclusion" data-zone="${z}" data-entity="${zEntity}">
+                <title>${zEntity ? `Zone ${z} (Mask) - Click to view history (${zEntity})` : `Zone ${z} (Mask)`}</title>
+                <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" stroke-dasharray="25,15" />
+                <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                      font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                  Zone ${z} (Mask)${zOcc ? " ⚠️" : ""}
+                </text>
+              </g>
             `;
           } else {
             const stroke = z === this._selectedZone ? "#f59e0b" : (zOcc ? "#10b981" : "#38bdf8");
             const fill = z === this._selectedZone ? "rgba(245, 158, 11, 0.2)" : (zOcc ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.08)");
             zHtml += `
-              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" />
-              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
-                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-                Zone ${z}${zOcc ? " 👤" : ""}
-              </text>
+              <g class="vf-zone-group" data-zone="${z}" data-entity="${zEntity}">
+                <title>${zEntity ? `Zone ${z} - Click to view history (${zEntity})` : `Zone ${z}`}</title>
+                <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" />
+                <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                      font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                  Zone ${z}${zOcc ? " 👤" : ""}
+                </text>
+              </g>
             `;
           }
         }
@@ -2779,12 +2986,16 @@ class RadarCalibrationCard extends HTMLElement {
     if (chipOcc) {
       chipOcc.className = "chip " + (occ ? "occupied" : "");
       chipOcc.textContent = occ ? "🟢 Occupied" : "⚪ Clear";
+      chipOcc.dataset.entity = ent.occupancy || "";
+      chipOcc.title = ent.occupancy ? `Click to view history (${ent.occupancy})` : "Occupancy";
     }
 
     const tc = getVal(ent.target_count, 0);
     const chipTc = this.shadowRoot.getElementById("chipCalTargets");
     if (chipTc) {
       chipTc.textContent = `🎯 ${tc} Target${tc === 1 ? "" : "s"}`;
+      chipTc.dataset.entity = ent.target_count || "";
+      chipTc.title = ent.target_count ? `Click to view history (${ent.target_count})` : "Target Count";
     }
 
     const latched = getState(ent.stationary_memory_active, "off") === "on";
@@ -2792,12 +3003,16 @@ class RadarCalibrationCard extends HTMLElement {
     if (chipLatch) {
       chipLatch.style.display = latched ? "inline-flex" : "none";
       chipLatch.className = "chip latched";
+      chipLatch.dataset.entity = ent.stationary_memory_active || "";
+      chipLatch.title = ent.stationary_memory_active ? `Click to view history (${ent.stationary_memory_active})` : "Stationary Latch";
     }
 
     const wifi = states[ent.wifi_signal] ? states[ent.wifi_signal].state : "--";
     const chipWifi = this.shadowRoot.getElementById("chipCalWifi");
     if (chipWifi) {
       chipWifi.textContent = `📶 ${wifi} dBm`;
+      chipWifi.dataset.entity = ent.wifi_signal || "";
+      chipWifi.title = ent.wifi_signal ? `Click to view history (${ent.wifi_signal})` : "Wi-Fi Signal";
     }
 
     // Viewfinder is visible on ALL tabs! Update targets & zone occupancy highlights on all tabs:
@@ -3196,4 +3411,4 @@ if (!customElements.get("presence-calibration-card")) {
   customElements.define("presence-calibration-card", RadarCalibrationCard);
 }
 
-console.log("[PRESENCE-RADAR-CARDS] v1.7.3 High-Precision mmWave Radar Suite initialized.");
+console.log("[PRESENCE-RADAR-CARDS] v1.7.4 High-Precision mmWave Radar Suite initialized.");
