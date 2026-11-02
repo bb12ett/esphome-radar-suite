@@ -139,9 +139,29 @@ inline bool plausibly_same_person(const TargetData &last, const TargetData &now_
   return std::hypot(now_t.x - last.x, now_t.y - last.y) <= max_move;
 }
 
+// Zone coordinate collision test (with rotation support)
+inline bool is_point_in_zone(float x1, float y1, float x2, float y2, float angle_deg, float px, float py) {
+  if (x1 == 0 && y1 == 0 && x2 == 0 && y2 == 0) return false;
+  float min_x = std::min(x1, x2);
+  float max_x = std::max(x1, x2);
+  float min_y = std::min(y1, y2);
+  float max_y = std::max(y1, y2);
+  if (angle_deg == 0.0f) {
+    return px >= min_x && px <= max_x && py >= min_y && py <= max_y;
+  }
+  float cx = (min_x + max_x) * 0.5f;
+  float cy = (min_y + max_y) * 0.5f;
+  float half_w = (max_x - min_x) * 0.5f;
+  float half_h = (max_y - min_y) * 0.5f;
+  float u = 0, v = 0;
+  rotate_point(px - cx, py - cy, -angle_deg, u, v);
+  return fabsf(u) <= half_w && fabsf(v) <= half_h;
+}
+
 class ZoneCalibrator {
  public:
-  CalibrationPoint point_a[5];  // 0..3: Zones 1..4, 4: Room Boundary
+  static constexpr size_t MAX_CALIBRATION_SLOTS = 11;  // 0..9: Zones 1..10, 10: Room Boundary
+  CalibrationPoint point_a[MAX_CALIBRATION_SLOTS];
   TargetData last_valid_target;
   uint32_t last_valid_time{0};
 
@@ -189,6 +209,25 @@ class ZoneTracker {
   int target_count{0};
   uint32_t last_inside_ms{0};
 
+  void update_exclusion(float x1, float y1, float x2, float y2, float angle_deg,
+                        const TargetData targets[3]) {
+    if (x1 == 0 && y1 == 0 && x2 == 0 && y2 == 0) {
+      this->reset_();
+      return;
+    }
+    int count = 0;
+    for (int i = 0; i < 3; i++) {
+      const TargetData &t = targets[i];
+      if (!t.active || std::isnan(t.x) || std::isnan(t.y)) continue;
+      if (is_point_in_zone(x1, y1, x2, y2, angle_deg, t.x, t.y)) {
+        count++;
+      }
+    }
+    target_count = count;
+    occupied = (count > 0);
+    latched = false;
+  }
+
   void update(float x1, float y1, float x2, float y2, float angle_deg,
               const TargetData targets[3],
               const RoomBounds &room,
@@ -205,22 +244,8 @@ class ZoneTracker {
       return;
     }
 
-    float min_x = std::min(x1, x2);
-    float max_x = std::max(x1, x2);
-    float min_y = std::min(y1, y2);
-    float max_y = std::max(y1, y2);
-    float cx = (min_x + max_x) * 0.5f;
-    float cy = (min_y + max_y) * 0.5f;
-    float half_w = (max_x - min_x) * 0.5f;
-    float half_h = (max_y - min_y) * 0.5f;
-
     auto point_in_zone = [&](float px, float py) -> bool {
-      if (angle_deg == 0.0f) {
-        return px >= min_x && px <= max_x && py >= min_y && py <= max_y;
-      }
-      float u = 0, v = 0;
-      rotate_point(px - cx, py - cy, -angle_deg, u, v);
-      return fabsf(u) <= half_w && fabsf(v) <= half_h;
+      return is_point_in_zone(x1, y1, x2, y2, angle_deg, px, py);
     };
 
     uint8_t inside_mask = 0;

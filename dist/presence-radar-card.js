@@ -1,13 +1,13 @@
 /**
  * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
- * Version 1.6.1 - High-Precision mmWave Radar Suite
+ * Version 1.7.3 - High-Precision mmWave Radar Suite (Reactive Mode Toggle Fix)
  * 
  * Includes:
  * 1. <radar-map-card>         (Lovelace: custom:radar-map-card)
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.6.1";
+const CARD_VERSION = "1.7.3";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -224,7 +224,10 @@ class RadarEntityResolver {
       btn_clear_zone: findEntity("button", "clear_selected_zone"),
       calibration_padding: findEntity("number", "calibration_padding"),
 
-      // Zones 1 - 4
+      // Dynamic Active Zones (1 - 10)
+      active_zones: findEntity("number", "active_zones"),
+
+      // Zones 1 - 10 (Multi-Mode Software Zones: Detection vs Exclusion)
       zone1_occupancy: findEntity("binary_sensor", "zone_1_occupancy"),
       zone1_target_count: findEntity("sensor", "zone_1_target_count"),
       zone1_memory_active: findEntity("binary_sensor", "zone_1_memory_active"),
@@ -233,6 +236,7 @@ class RadarEntityResolver {
       zone1_x2: findEntity("number", "zone_1_x2"),
       zone1_y2: findEntity("number", "zone_1_y2"),
       zone1_angle: findEntity("number", "zone_1_angle"),
+      zone1_mode: findEntity("select", "zone_1_mode"),
 
       zone2_occupancy: findEntity("binary_sensor", "zone_2_occupancy"),
       zone2_target_count: findEntity("sensor", "zone_2_target_count"),
@@ -242,6 +246,7 @@ class RadarEntityResolver {
       zone2_x2: findEntity("number", "zone_2_x2"),
       zone2_y2: findEntity("number", "zone_2_y2"),
       zone2_angle: findEntity("number", "zone_2_angle"),
+      zone2_mode: findEntity("select", "zone_2_mode"),
 
       zone3_occupancy: findEntity("binary_sensor", "zone_3_occupancy"),
       zone3_target_count: findEntity("sensor", "zone_3_target_count"),
@@ -251,6 +256,7 @@ class RadarEntityResolver {
       zone3_x2: findEntity("number", "zone_3_x2"),
       zone3_y2: findEntity("number", "zone_3_y2"),
       zone3_angle: findEntity("number", "zone_3_angle"),
+      zone3_mode: findEntity("select", "zone_3_mode"),
 
       zone4_occupancy: findEntity("binary_sensor", "zone_4_occupancy"),
       zone4_target_count: findEntity("sensor", "zone_4_target_count"),
@@ -260,21 +266,67 @@ class RadarEntityResolver {
       zone4_x2: findEntity("number", "zone_4_x2"),
       zone4_y2: findEntity("number", "zone_4_y2"),
       zone4_angle: findEntity("number", "zone_4_angle"),
+      zone4_mode: findEntity("select", "zone_4_mode"),
 
-      // Hardware Exclusion Masks (1 - 3)
-      exclusion_mode: findEntity("select", "hardware_exclusion_mode"),
-      mask1_x1: findEntity("number", "exclusion_zone_1_x1"),
-      mask1_y1: findEntity("number", "exclusion_zone_1_y1"),
-      mask1_x2: findEntity("number", "exclusion_zone_1_x2"),
-      mask1_y2: findEntity("number", "exclusion_zone_1_y2"),
-      mask2_x1: findEntity("number", "exclusion_zone_2_x1"),
-      mask2_y1: findEntity("number", "exclusion_zone_2_y1"),
-      mask2_x2: findEntity("number", "exclusion_zone_2_x2"),
-      mask2_y2: findEntity("number", "exclusion_zone_2_y2"),
-      mask3_x1: findEntity("number", "exclusion_zone_3_x1"),
-      mask3_y1: findEntity("number", "exclusion_zone_3_y1"),
-      mask3_x2: findEntity("number", "exclusion_zone_3_x2"),
-      mask3_y2: findEntity("number", "exclusion_zone_3_y2"),
+      zone5_occupancy: findEntity("binary_sensor", "zone_5_occupancy"),
+      zone5_target_count: findEntity("sensor", "zone_5_target_count"),
+      zone5_memory_active: findEntity("binary_sensor", "zone_5_memory_active"),
+      zone5_x1: findEntity("number", "zone_5_x1"),
+      zone5_y1: findEntity("number", "zone_5_y1"),
+      zone5_x2: findEntity("number", "zone_5_x2"),
+      zone5_y2: findEntity("number", "zone_5_y2"),
+      zone5_angle: findEntity("number", "zone_5_angle"),
+      zone5_mode: findEntity("select", "zone_5_mode"),
+
+      zone6_occupancy: findEntity("binary_sensor", "zone_6_occupancy"),
+      zone6_target_count: findEntity("sensor", "zone_6_target_count"),
+      zone6_memory_active: findEntity("binary_sensor", "zone_6_memory_active"),
+      zone6_x1: findEntity("number", "zone_6_x1"),
+      zone6_y1: findEntity("number", "zone_6_y1"),
+      zone6_x2: findEntity("number", "zone_6_x2"),
+      zone6_y2: findEntity("number", "zone_6_y2"),
+      zone6_angle: findEntity("number", "zone_6_angle"),
+      zone6_mode: findEntity("select", "zone_6_mode"),
+
+      zone7_occupancy: findEntity("binary_sensor", "zone_7_occupancy"),
+      zone7_target_count: findEntity("sensor", "zone_7_target_count"),
+      zone7_memory_active: findEntity("binary_sensor", "zone_7_memory_active"),
+      zone7_x1: findEntity("number", "zone_7_x1"),
+      zone7_y1: findEntity("number", "zone_7_y1"),
+      zone7_x2: findEntity("number", "zone_7_x2"),
+      zone7_y2: findEntity("number", "zone_7_y2"),
+      zone7_angle: findEntity("number", "zone_7_angle"),
+      zone7_mode: findEntity("select", "zone_7_mode"),
+
+      zone8_occupancy: findEntity("binary_sensor", "zone_8_occupancy"),
+      zone8_target_count: findEntity("sensor", "zone_8_target_count"),
+      zone8_memory_active: findEntity("binary_sensor", "zone_8_memory_active"),
+      zone8_x1: findEntity("number", "zone_8_x1"),
+      zone8_y1: findEntity("number", "zone_8_y1"),
+      zone8_x2: findEntity("number", "zone_8_x2"),
+      zone8_y2: findEntity("number", "zone_8_y2"),
+      zone8_angle: findEntity("number", "zone_8_angle"),
+      zone8_mode: findEntity("select", "zone_8_mode"),
+
+      zone9_occupancy: findEntity("binary_sensor", "zone_9_occupancy"),
+      zone9_target_count: findEntity("sensor", "zone_9_target_count"),
+      zone9_memory_active: findEntity("binary_sensor", "zone_9_memory_active"),
+      zone9_x1: findEntity("number", "zone_9_x1"),
+      zone9_y1: findEntity("number", "zone_9_y1"),
+      zone9_x2: findEntity("number", "zone_9_x2"),
+      zone9_y2: findEntity("number", "zone_9_y2"),
+      zone9_angle: findEntity("number", "zone_9_angle"),
+      zone9_mode: findEntity("select", "zone_9_mode"),
+
+      zone10_occupancy: findEntity("binary_sensor", "zone_10_occupancy"),
+      zone10_target_count: findEntity("sensor", "zone_10_target_count"),
+      zone10_memory_active: findEntity("binary_sensor", "zone_10_memory_active"),
+      zone10_x1: findEntity("number", "zone_10_x1"),
+      zone10_y1: findEntity("number", "zone_10_y1"),
+      zone10_x2: findEntity("number", "zone_10_x2"),
+      zone10_y2: findEntity("number", "zone_10_y2"),
+      zone10_angle: findEntity("number", "zone_10_angle"),
+      zone10_mode: findEntity("select", "zone_10_mode"),
 
       // Engine Tuning & Sensitivity
       presence_timeout: findEntity("number", "presence_timeout"),
@@ -287,6 +339,76 @@ class RadarEntityResolver {
       restart_radar: findEntity("button", "restart_radar"),
       factory_reset_radar: findEntity("button", "factory_reset_radar")
     };
+  }
+}
+
+// ====================================================================
+// VISIBILITY MANAGER: Automatic Background Sync of Zone Entities in HA
+// ====================================================================
+class RadarVisibilityManager {
+  static _synced = {};
+
+  static clearCache(device) {
+    if (device) {
+      for (const k of Object.keys(this._synced)) {
+        if (k.startsWith(`${device}_`)) delete this._synced[k];
+      }
+    } else {
+      this._synced = {};
+    }
+  }
+
+  static async sync(hass, entities, selectedDevice) {
+    if (!hass || !hass.callWS || !entities || !entities.active_zones) return;
+    const states = hass.states;
+    if (!states || !states[entities.active_zones]) return;
+
+    const rawVal = parseFloat(states[entities.active_zones].state);
+    if (isNaN(rawVal)) return;
+    const activeCount = Math.max(1, Math.min(10, Math.round(rawVal)));
+    const devKey = selectedDevice || "default";
+    const cacheKey = `${devKey}_${activeCount}`;
+    if (this._synced[cacheKey]) return;
+
+    this._synced[cacheKey] = true;
+
+    for (let z = 1; z <= 10; z++) {
+      const shouldHide = z > activeCount;
+      const targetHiddenBy = shouldHide ? "user" : null;
+      
+      const zoneKeys = [
+        `zone${z}_occupancy`,
+        `zone${z}_target_count`,
+        `zone${z}_memory_active`,
+        `zone${z}_x1`,
+        `zone${z}_y1`,
+        `zone${z}_x2`,
+        `zone${z}_y2`,
+        `zone${z}_angle`,
+        `zone${z}_mode`
+      ];
+
+      for (const k of zoneKeys) {
+        const entityId = entities[k];
+        if (!entityId) continue;
+
+        if (hass.entities && hass.entities[entityId]) {
+          const isHidden = Boolean(hass.entities[entityId].hidden);
+          if (shouldHide === isHidden) continue;
+        }
+
+        try {
+          await hass.callWS({
+            type: "config/entity_registry/update",
+            entity_id: entityId,
+            hidden_by: targetHiddenBy
+          });
+        } catch (e) {
+          // Ignore benign errors (e.g. non-admin sessions)
+        }
+      }
+    }
+    console.log(`[PRESENCE-RADAR] Automatically synced entity visibility for ${devKey}: ${activeCount} active, ${10 - activeCount} hidden.`);
   }
 }
 
@@ -807,7 +929,7 @@ class RadarMapCard extends HTMLElement {
         }
         .zones-row {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
           gap: 6px;
           margin-top: 10px;
         }
@@ -829,6 +951,21 @@ class RadarMapCard extends HTMLElement {
           background: rgba(16, 185, 129, 0.2);
           border-color: rgba(16, 185, 129, 0.6);
           color: #34d399;
+          font-weight: 700;
+        }
+        .zone-pill.exclusion {
+          border-color: rgba(239, 68, 68, 0.4);
+          color: #f87171;
+        }
+        .zone-pill.exclusion.active {
+          background: rgba(239, 68, 68, 0.12);
+          border-color: rgba(239, 68, 68, 0.5);
+          color: #fca5a5;
+        }
+        .zone-pill.exclusion.occupied {
+          background: rgba(239, 68, 68, 0.25);
+          border-color: #ef4444;
+          color: #fecaca;
           font-weight: 700;
         }
       </style>
@@ -875,6 +1012,9 @@ class RadarMapCard extends HTMLElement {
               <clipPath id="radarRoomClip">
                 <rect id="radarRoomClipRect" x="0" y="0" width="4000" height="5000" rx="6" />
               </clipPath>
+              <pattern id="exclusionHatch" width="80" height="80" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="80" stroke="#ef4444" stroke-width="20" stroke-opacity="0.35" />
+              </pattern>
             </defs>
 
             <!-- Room Boundaries & Walls -->
@@ -936,6 +1076,9 @@ class RadarMapCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
+
+    // Automatic Entity Visibility Sync in HA (silent background check)
+    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
 
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
@@ -1031,69 +1174,73 @@ class RadarMapCard extends HTMLElement {
       beamCone.setAttribute("d", `M ${sx} ${sy} L ${lx} ${ly} A ${beamDist} ${beamDist} 0 0 1 ${rx} ${ry} Z`);
     }
 
-    // Render Zones
+    // Render Zones & Exclusion Masks
+    const activeZones = Math.max(1, Math.min(10, getVal(ent.active_zones, 4)));
+    const zonesRow = this.shadowRoot.getElementById("zonesRow");
+    if (zonesRow) {
+      let pillsHtml = "";
+      for (let z = 1; z <= activeZones; z++) {
+        const x1 = getVal(ent[`zone${z}_x1`]);
+        const y1 = getVal(ent[`zone${z}_y1`]);
+        const x2 = getVal(ent[`zone${z}_x2`]);
+        const y2 = getVal(ent[`zone${z}_y2`]);
+        const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
+        const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
+        const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
+
+        const cls = "zone-pill" +
+                    (isExcl ? " exclusion" : "") +
+                    (isConfigured ? (zOcc ? " occupied" : " active") : "");
+        const label = `Z${z}${isExcl ? " (Mask)" : ""}${zOcc ? (isExcl ? " ⚠️" : " (OCC)") : ""}`;
+        pillsHtml += `<div class="${cls}" id="pillZ${z}">${label}</div>`;
+      }
+      zonesRow.innerHTML = pillsHtml;
+    }
+
     const zonesLayer = this.shadowRoot.getElementById("zonesLayer");
     if (zonesLayer) {
       let zonesHtml = "";
-      for (let z = 1; z <= 4; z++) {
+      for (let z = 1; z <= activeZones; z++) {
         const x1 = getVal(ent[`zone${z}_x1`]);
         const y1 = getVal(ent[`zone${z}_y1`]);
         const x2 = getVal(ent[`zone${z}_x2`]);
         const y2 = getVal(ent[`zone${z}_y2`]);
         const zAngle = getVal(ent[`zone${z}_angle`], 0);
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
-
-        const pill = this.shadowRoot.getElementById(`pillZ${z}`);
-        if (pill) {
-          const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
-          pill.className = "zone-pill " + (isConfigured ? (zOcc ? "occupied" : "active") : "");
-          pill.textContent = `Zone ${z}${zOcc ? " (OCC)" : ""}`;
-        }
+        const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
 
         if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
           const corners = RoomGeometry.transformZonePolygon(x1, y1, x2, y2, zAngle, geom);
           const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
-          const stroke = zOcc ? "#10b981" : "#38bdf8";
-          const fill = zOcc ? "rgba(16, 185, 129, 0.25)" : "rgba(56, 189, 248, 0.1)";
 
-          zonesHtml += `
-            <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="${zOcc ? "none" : "30,15"}" />
-            <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
-                  font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-              Zone ${z}${zOcc ? " 👤" : ""}
-            </text>
-          `;
-        }
-      }
-      zonesLayer.innerHTML = zonesHtml;
-    }
-
-    // Render Hardware Exclusion Masks (Frame 1 -> Frame 3)
-    const masksLayer = this.shadowRoot.getElementById("masksLayer");
-    if (masksLayer) {
-      const exclMode = getState(ent.exclusion_mode, "Filter");
-      let masksHtml = "";
-      if (exclMode !== "Disabled") {
-        for (let m = 1; m <= 3; m++) {
-          const mx1 = getVal(ent[`mask${m}_x1`]);
-          const my1 = getVal(ent[`mask${m}_y1`]);
-          const mx2 = getVal(ent[`mask${m}_x2`]);
-          const my2 = getVal(ent[`mask${m}_y2`]);
-          if (mx1 !== 0 || mx2 !== 0 || my1 !== 0 || my2 !== 0) {
-            const corners = RoomGeometry.transformMaskPolygon(mx1, my1, mx2, my2, geom);
-            const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
-            masksHtml += `
-              <polygon points="${pts}" fill="rgba(239, 68, 68, 0.14)" stroke="#ef4444" stroke-width="10" stroke-dasharray="25,15" />
-              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="#ef4444"
-                    font-size="125" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-                Mask ${m}
+          if (isExcl) {
+            const stroke = zOcc ? "#ef4444" : "#f87171";
+            const fill = zOcc ? "rgba(239, 68, 68, 0.35)" : "url(#exclusionHatch)";
+            zonesHtml += `
+              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="25,15" />
+              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                Zone ${z} (Mask)${zOcc ? " ⚠️" : ""}
+              </text>
+            `;
+          } else {
+            const stroke = zOcc ? "#10b981" : "#38bdf8";
+            const fill = zOcc ? "rgba(16, 185, 129, 0.25)" : "rgba(56, 189, 248, 0.1)";
+            zonesHtml += `
+              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="12" stroke-dasharray="${zOcc ? "none" : "30,15"}" />
+              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                Zone ${z}${zOcc ? " 👤" : ""}
               </text>
             `;
           }
         }
       }
-      masksLayer.innerHTML = masksHtml;
+      zonesLayer.innerHTML = zonesHtml;
     }
+
+    const masksLayer = this.shadowRoot.getElementById("masksLayer");
+    if (masksLayer) masksLayer.innerHTML = "";
 
     // Render Targets & Motion Trails
     const targetsLayer = this.shadowRoot.getElementById("targetsLayer");
@@ -1385,10 +1532,19 @@ class RadarCalibrationCard extends HTMLElement {
     this._callService("switch", "toggle", { entity_id: entityId });
   }
 
+  _syncZoneEntitiesVisibility(activeCount) {
+    RadarVisibilityManager.clearCache(this._selectedDevice);
+    return RadarVisibilityManager.sync(this._hass, this._entities, this._selectedDevice);
+  }
+
   _initFormStateFromEntities() {
     if (!this._entities || !this._hass) return;
     const ent = this._entities;
     const states = this._hass.states;
+
+    // Automatic Entity Visibility Sync in HA (silent background check)
+    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
       const v = parseFloat(states[id].state);
@@ -1441,6 +1597,7 @@ class RadarCalibrationCard extends HTMLElement {
       const el = this.shadowRoot.getElementById(id);
       if (el) el.value = val;
     };
+    setInp("inpActiveZones", getVal(ent.active_zones, 4));
     setInp("inpMaxDistance", getVal(ent.max_distance, 6000));
     setInp("inpPresenceTimeout", getVal(ent.presence_timeout, 5));
     setInp("inpZoneOffDelay", getVal(ent.zone_off_delay, 5));
@@ -1926,6 +2083,9 @@ class RadarCalibrationCard extends HTMLElement {
                 <stop offset="70%" stop-color="#0284c7" stop-opacity="0.05" />
                 <stop offset="100%" stop-color="#0284c7" stop-opacity="0" />
               </radialGradient>
+              <pattern id="vfExclusionHatch" width="80" height="80" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="80" stroke="#ef4444" stroke-width="20" stroke-opacity="0.35" />
+              </pattern>
             </defs>
             <g id="vfRoomLayer"></g>
             <g id="vfZonesLayer"></g>
@@ -1939,8 +2099,7 @@ class RadarCalibrationCard extends HTMLElement {
         <!-- Tabs Navigation -->
         <div class="tabs-nav">
           <button class="tab-btn ${this._activeTab === "placement" ? "active" : ""}" data-tab="placement">📐 Placement & Room</button>
-          <button class="tab-btn ${this._activeTab === "zones" ? "active" : ""}" data-tab="zones">🎯 Detection Zones</button>
-          <button class="tab-btn ${this._activeTab === "masks" ? "active" : ""}" data-tab="masks">🛡️ Exclusion Masks</button>
+          <button class="tab-btn ${this._activeTab === "zones" ? "active" : ""}" data-tab="zones">🎯 Multi-Mode Zones</button>
           <button class="tab-btn ${this._activeTab === "engine" ? "active" : ""}" data-tab="engine">⚙️ Engine & Sensitivity</button>
         </div>
 
@@ -2013,47 +2172,19 @@ class RadarCalibrationCard extends HTMLElement {
           </div>
         </div>
 
-        <!-- TAB 3: HARDWARE EXCLUSION MASKS -->
-        <div class="tab-pane ${this._activeTab === "masks" ? "active" : ""}" id="tabMasks">
-          <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:14px;">
-            Hardware exclusion masks tell the LD2450 radar chip to ignore permanent moving/vibrating objects like ceiling fans, fluttery curtains, or TV displays.
-          </div>
-
-          <div class="form-grid" style="grid-template-columns: 1fr; margin-bottom: 14px;">
-            <div class="form-group">
-              <label class="form-label">Hardware Exclusion Filter Mode</label>
-              <select class="form-select" id="selExclusionMode">
-                <option value="Disabled">Disabled (Masks inactive on radar chip)</option>
-                <option value="Filter">Filter (Ignore targets inside masks — fans, curtains)</option>
-                <option value="Detection">Detection (Only detect targets inside masks)</option>
-              </select>
+        <!-- TAB 3: ENGINE & SENSITIVITY -->
+        <div class="tab-pane ${this._activeTab === "engine" ? "active" : ""}" id="tabEngine">
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-title">Active Zone Count (1 to 10)</div>
+              <div class="setting-desc">Number of software zones to track. Inactive zones are automatically collapsed into the hidden entities section in Home Assistant.</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" class="form-input" id="inpActiveZones" min="1" max="10" style="width:70px;" />
+              <button class="btn-secondary" style="padding:6px 10px;" id="btnSaveActiveZones">Set</button>
             </div>
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 14px; width: 100%; box-sizing: border-box;">
-            ${[1, 2, 3].map(m => `
-              <div class="stepper-box">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                  <span style="font-weight:700; font-size:0.88rem;">🛡️ Exclusion Mask ${m}</span>
-                  <span style="font-size:0.72rem; color:var(--text-muted);" id="statusMask${m}">Inactive</span>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;">
-                  <div class="form-group"><label class="form-label">X1 (mm)</label><input type="number" class="form-input" id="inpMask${m}_x1" /></div>
-                  <div class="form-group"><label class="form-label">Y1 (mm)</label><input type="number" class="form-input" id="inpMask${m}_y1" /></div>
-                  <div class="form-group"><label class="form-label">X2 (mm)</label><input type="number" class="form-input" id="inpMask${m}_x2" /></div>
-                  <div class="form-group"><label class="form-label">Y2 (mm)</label><input type="number" class="form-input" id="inpMask${m}_y2" /></div>
-                </div>
-                <div style="display:flex; gap:8px; flex-wrap: wrap;">
-                  <button class="btn-primary" style="padding:7px 14px; font-size:0.8rem;" id="btnSaveMask${m}">💾 Save Mask ${m}</button>
-                  <button class="btn-danger" style="padding:7px 14px; font-size:0.8rem;" id="btnClearMask${m}">Clear</button>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        </div>
-
-        <!-- TAB 4: ENGINE & SENSITIVITY -->
-        <div class="tab-pane ${this._activeTab === "engine" ? "active" : ""}" id="tabEngine">
           <div class="setting-row">
             <div class="setting-info">
               <div class="setting-title">Maximum Detection Distance</div>
@@ -2365,6 +2496,22 @@ class RadarCalibrationCard extends HTMLElement {
         });
       }
     };
+    // Active Zones Save (auto-syncs visibility)
+    const btnActiveZones = this.shadowRoot.getElementById("btnSaveActiveZones");
+    if (btnActiveZones) {
+      btnActiveZones.addEventListener("click", () => {
+        const val = parseInt(this.shadowRoot.getElementById("inpActiveZones").value, 10);
+        if (!isNaN(val) && val >= 1 && val <= 10) {
+          if (this._entities.active_zones) {
+            this._setNumber(this._entities.active_zones, val);
+          }
+          this._showToast(`Active zone count set to ${val}.`);
+          RadarVisibilityManager.clearCache(this._selectedDevice);
+          RadarVisibilityManager.sync(this._hass, this._entities, this._selectedDevice);
+        }
+      });
+    }
+
     bindNumSave("btnSaveMaxDist", "inpMaxDistance", "max_distance", "Max distance updated.");
     bindNumSave("btnSaveTimeout", "inpPresenceTimeout", "presence_timeout", "Presence timeout updated.");
     bindNumSave("btnSaveZoneDelay", "inpZoneOffDelay", "zone_off_delay", "Zone off delay updated.");
@@ -2403,61 +2550,6 @@ class RadarCalibrationCard extends HTMLElement {
           this._showToast("Factory reset command sent.");
         }
       });
-    }
-
-    const selExcl = this.shadowRoot.getElementById("selExclusionMode");
-    if (selExcl) {
-      selExcl.addEventListener("change", (e) => {
-        this._setSelect(this._entities.exclusion_mode, e.target.value);
-        this._showToast(`Hardware exclusion mode set to ${e.target.value}.`);
-        this._updateViewfinder();
-      });
-    }
-
-    for (let m = 1; m <= 3; m++) {
-      const btnSave = this.shadowRoot.getElementById(`btnSaveMask${m}`);
-      if (btnSave) {
-        btnSave.addEventListener("click", () => {
-          const x1 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_x1`).value) || 0;
-          const y1 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_y1`).value) || 0;
-          const x2 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_x2`).value) || 0;
-          const y2 = parseFloat(this.shadowRoot.getElementById(`inpMask${m}_y2`).value) || 0;
-          const hasMask = (x1 !== 0 || y1 !== 0 || x2 !== 0 || y2 !== 0);
-          if (hasMask && selExcl && selExcl.value === "Disabled") {
-            selExcl.value = "Filter";
-            this._setSelect(this._entities.exclusion_mode, "Filter");
-          }
-          this._setNumber(this._entities[`mask${m}_x1`], x1);
-          this._setNumber(this._entities[`mask${m}_y1`], y1);
-          this._setNumber(this._entities[`mask${m}_x2`], x2);
-          this._setNumber(this._entities[`mask${m}_y2`], y2);
-          this._showToast(`Mask ${m} saved to LD2450 hardware memory.`);
-          this._updateViewfinder();
-        });
-      }
-
-      // Live typing on mask coordinates updates viewfinder map!
-      ["x1", "y1", "x2", "y2"].forEach(coord => {
-        const inp = this.shadowRoot.getElementById(`inpMask${m}_${coord}`);
-        if (inp) {
-          inp.addEventListener("input", () => this._updateViewfinder());
-        }
-      });
-      const btnClr = this.shadowRoot.getElementById(`btnClearMask${m}`);
-      if (btnClr) {
-        btnClr.addEventListener("click", () => {
-          this._setNumber(this._entities[`mask${m}_x1`], 0);
-          this._setNumber(this._entities[`mask${m}_y1`], 0);
-          this._setNumber(this._entities[`mask${m}_x2`], 0);
-          this._setNumber(this._entities[`mask${m}_y2`], 0);
-          this.shadowRoot.getElementById(`inpMask${m}_x1`).value = 0;
-          this.shadowRoot.getElementById(`inpMask${m}_y1`).value = 0;
-          this.shadowRoot.getElementById(`inpMask${m}_x2`).value = 0;
-          this.shadowRoot.getElementById(`inpMask${m}_y2`).value = 0;
-          this._showToast(`Mask ${m} cleared.`);
-          this._updateViewfinder();
-        });
-      }
     }
   }
 
@@ -2547,14 +2639,16 @@ class RadarCalibrationCard extends HTMLElement {
       };
       const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
+      const activeZones = Math.max(1, Math.min(10, getVal(ent.active_zones, 4)));
       let zHtml = "";
-      for (let z = 1; z <= 4; z++) {
+      for (let z = 1; z <= activeZones; z++) {
         let x1 = getVal(ent[`zone${z}_x1`]);
         let y1 = getVal(ent[`zone${z}_y1`]);
         let x2 = getVal(ent[`zone${z}_x2`]);
         let y2 = getVal(ent[`zone${z}_y2`]);
         let zAngle = getVal(ent[`zone${z}_angle`], 0);
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
+        const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
 
         // Preview unsaved manual input edits only when the user has modified the inputs (_zoneDirty)
         if (z === this._selectedZone && this._zoneDirty) {
@@ -2580,79 +2674,35 @@ class RadarCalibrationCard extends HTMLElement {
         if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
           const corners = RoomGeometry.transformZonePolygon(x1, y1, x2, y2, zAngle, previewGeom);
           const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
-          const stroke = z === this._selectedZone ? "#f59e0b" : (zOcc ? "#10b981" : "#38bdf8");
-          const fill = z === this._selectedZone ? "rgba(245, 158, 11, 0.2)" : (zOcc ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.08)");
 
-          zHtml += `
-            <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" />
-            <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
-                  font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-              Zone ${z}${zOcc ? " 👤" : ""}
-            </text>
-          `;
+          if (isExcl) {
+            const stroke = z === this._selectedZone ? "#f59e0b" : (zOcc ? "#ef4444" : "#f87171");
+            const fill = z === this._selectedZone ? "rgba(245, 158, 11, 0.2)" : (zOcc ? "rgba(239, 68, 68, 0.35)" : "url(#vfExclusionHatch)");
+            zHtml += `
+              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" stroke-dasharray="25,15" />
+              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                Zone ${z} (Mask)${zOcc ? " ⚠️" : ""}
+              </text>
+            `;
+          } else {
+            const stroke = z === this._selectedZone ? "#f59e0b" : (zOcc ? "#10b981" : "#38bdf8");
+            const fill = z === this._selectedZone ? "rgba(245, 158, 11, 0.2)" : (zOcc ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.08)");
+            zHtml += `
+              <polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${z === this._selectedZone ? 16 : 10}" />
+              <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="${stroke}"
+                    font-size="140" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+                Zone ${z}${zOcc ? " 👤" : ""}
+              </text>
+            `;
+          }
         }
       }
       vfZones.innerHTML = zHtml;
     }
 
-    // 4b. Update Exclusion Masks inside Viewfinder (Frame 1 -> Frame 3 via transformMaskPolygon)
     const vfMasks = this.shadowRoot.getElementById("vfMasksLayer");
-    if (vfMasks && this._entities && this._hass) {
-      const ent = this._entities;
-      const states = this._hass.states;
-      const getVal = (id, def = 0) => {
-        if (!id || !states[id]) return def;
-        const v = parseFloat(states[id].state);
-        return Number.isFinite(v) ? v : def;
-      };
-      const selExcl = this.shadowRoot.getElementById("selExclusionMode");
-      const exclMode = selExcl ? selExcl.value : ((ent.exclusion_mode && states[ent.exclusion_mode]) ? states[ent.exclusion_mode].state : "Filter");
-
-      let mHtml = "";
-      for (let m = 1; m <= 3; m++) {
-        let mx1 = getVal(ent[`mask${m}_x1`]);
-        let my1 = getVal(ent[`mask${m}_y1`]);
-        let mx2 = getVal(ent[`mask${m}_x2`]);
-        let my2 = getVal(ent[`mask${m}_y2`]);
-
-        const inX1 = this.shadowRoot.getElementById(`inpMask${m}_x1`);
-        const inY1 = this.shadowRoot.getElementById(`inpMask${m}_y1`);
-        const inX2 = this.shadowRoot.getElementById(`inpMask${m}_x2`);
-        const inY2 = this.shadowRoot.getElementById(`inpMask${m}_y2`);
-        if (inX1 && inY1 && inX2 && inY2) {
-          const vx1 = parseFloat(inX1.value);
-          const vy1 = parseFloat(inY1.value);
-          const vx2 = parseFloat(inX2.value);
-          const vy2 = parseFloat(inY2.value);
-          if (!isNaN(vx1)) mx1 = vx1;
-          if (!isNaN(vy1)) my1 = vy1;
-          if (!isNaN(vx2)) mx2 = vx2;
-          if (!isNaN(vy2)) my2 = vy2;
-        }
-
-        const statusEl = this.shadowRoot.getElementById(`statusMask${m}`);
-        const isConfigured = !(mx1 === 0 && mx2 === 0 && my1 === 0 && my2 === 0);
-        const isEnabled = isConfigured && exclMode !== "Disabled";
-        if (statusEl) {
-          statusEl.textContent = isConfigured ? (exclMode === "Disabled" ? "⚠️ Mode Disabled" : `🛡️ ${exclMode}`) : "Inactive";
-          statusEl.style.color = isEnabled ? "#ef4444" : (isConfigured ? "#f59e0b" : "var(--text-muted)");
-        }
-
-        if (isConfigured) {
-          const corners = RoomGeometry.transformMaskPolygon(mx1, my1, mx2, my2, previewGeom);
-          const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
-          const opacity = exclMode === "Disabled" ? "0.06" : "0.15";
-          mHtml += `
-            <polygon points="${pts}" fill="rgba(239, 68, 68, ${opacity})" stroke="#ef4444" stroke-width="12" stroke-dasharray="25,15" />
-            <text x="${(corners[0].x + corners[2].x) / 2}" y="${(corners[0].y + corners[2].y) / 2}" fill="#ef4444"
-                  font-size="130" font-weight="700" text-anchor="middle" dominant-baseline="middle">
-              Mask ${m} 🛡️
-            </text>
-          `;
-        }
-      }
-      vfMasks.innerHTML = mHtml;
-    }
+    if (vfMasks) vfMasks.innerHTML = "";
 
     // 5. Update Targets
     this._updateVfTargets(previewGeom);
@@ -2665,6 +2715,10 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
+
+    // Automatic Entity Visibility Sync in HA (silent background check)
+    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
       const v = parseFloat(states[id].state);
@@ -2708,6 +2762,10 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
+
+    // Automatic Entity Visibility Sync in HA (silent background check)
+    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
       const v = parseFloat(states[id].state);
@@ -2770,6 +2828,10 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
+
+    // Automatic Entity Visibility Sync in HA (silent background check)
+    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
       const v = parseFloat(states[id].state);
@@ -2777,8 +2839,9 @@ class RadarCalibrationCard extends HTMLElement {
     };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
+    const activeZones = Math.max(1, Math.min(10, getVal(ent.active_zones, 4)));
     let cardsHtml = "";
-    for (let z = 1; z <= 4; z++) {
+    for (let z = 1; z <= activeZones; z++) {
       const x1 = getVal(ent[`zone${z}_x1`]);
       const y1 = getVal(ent[`zone${z}_y1`]);
       const x2 = getVal(ent[`zone${z}_x2`]);
@@ -2786,25 +2849,27 @@ class RadarCalibrationCard extends HTMLElement {
       const angle = getVal(ent[`zone${z}_angle`], 0);
       const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
       const isOcc = getState(ent[`zone${z}_occupancy`]) === "on";
+      const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
       const isSelected = z === this._selectedZone;
 
       const width = isConfigured ? Math.abs(x2 - x1) : 0;
       const depth = isConfigured ? Math.abs(y2 - y1) : 0;
 
       cardsHtml += `
-        <div class="zone-card ${isSelected ? "selected" : ""}" data-zone="${z}">
+        <div class="zone-card ${isSelected ? "selected" : ""} ${isExcl ? "exclusion" : ""}" data-zone="${z}">
           <div class="zone-card-header">
-            <div class="zone-card-title">Zone ${z}</div>
-            <div class="zone-status-badge ${isOcc ? "occupied" : ""}">
-              ${isOcc ? "OCCUPIED" : (isConfigured ? "ACTIVE" : "EMPTY")}
+            <div class="zone-card-title">${isExcl ? "🛡️" : "🎯"} Zone ${z}</div>
+            <div class="zone-status-badge ${isExcl ? "exclusion" : ""} ${isOcc ? "occupied" : ""}">
+              ${isExcl ? (isOcc ? "⚠️ MASKED" : "MASK") : (isOcc ? "OCCUPIED" : (isConfigured ? "ACTIVE" : "EMPTY"))}
             </div>
           </div>
           <div class="zone-coords-info">
             ${isConfigured ? `
               <div>Size: <b>${width} × ${depth} mm</b></div>
               <div>Center: (${Math.round((x1+x2)/2)}, ${Math.round((y1+y2)/2)}) ${angle !== 0 ? `[${angle}°]` : ""}</div>
+              <div>Mode: <b>${isExcl ? "🔴 Exclusion Mask" : "🟢 Detection Zone"}</b></div>
             ` : `
-              <div>Not configured yet</div>
+              <div>Not configured yet (${isExcl ? "Mask" : "Detection"})</div>
               <div>Click to setup with walk-in wizard</div>
             `}
           </div>
@@ -2830,6 +2895,7 @@ class RadarCalibrationCard extends HTMLElement {
     const y2 = getVal(ent[`zone${curZ}_y2`]);
     const angle = getVal(ent[`zone${curZ}_angle`], 0);
     const isOcc = getState(ent[`zone${curZ}_occupancy`]) === "on";
+    const isExcl = getState(ent[`zone${curZ}_mode`]) === "Exclusion";
 
     const t1Dist = getVal(ent.target1_distance, 0);
     const t1RawX = getVal(ent.target1_x, NaN);
@@ -2863,6 +2929,19 @@ class RadarCalibrationCard extends HTMLElement {
       this._lastSyncedZoneSig = `${curZ}:${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(angle)}`;
 
       stepContent.innerHTML = `
+        <!-- Zone Mode Switcher -->
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; padding:10px 14px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid var(--border-color);">
+          <div>
+            <div style="font-weight:700; font-size:0.88rem;">Zone ${curZ} Mode</div>
+            <div id="zoneModeDesc" style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+              ${isExcl ? "🔴 Exclusion Mask — targets inside are ignored (fans, robot vacuums, pets)" : "🟢 Detection Zone — tracks occupants, presence memory & counts"}
+            </div>
+          </div>
+          <button id="btnToggleZoneMode" class="${isExcl ? "btn-danger" : "btn-primary"}" style="padding:6px 14px; font-size:0.8rem; font-weight:700; border-radius:6px; cursor:pointer;">
+            ${isExcl ? "🛡️ Mode: Exclusion" : "🎯 Mode: Detection"}
+          </button>
+        </div>
+
         <!-- Walk-in Wizard Buttons -->
         <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
           <button class="btn-primary" style="padding:8px 14px; font-size:0.82rem;" id="btnCaptureCorner1">📍 1. Capture Corner 1</button>
@@ -2929,11 +3008,27 @@ class RadarCalibrationCard extends HTMLElement {
 
         <div id="zoneLiveVerifBox" style="padding:10px; border-radius:8px; background:${isOcc ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.04)"}; border:1px solid ${isOcc ? "rgba(16, 185, 129, 0.4)" : "var(--border-color)"}; display:flex; align-items:center; justify-content:space-between;">
           <span style="font-size:0.85rem; font-weight:600;">Zone ${curZ} Live Verification:</span>
-          <span id="zoneLiveVerifPill" style="font-size:0.85rem; font-weight:700; color:${isOcc ? "#34d399" : "var(--text-muted)"};">
-            ${isOcc ? "👤 OCCUPIED" : "⚪ CLEAR"}
+          <span id="zoneLiveVerifPill" style="font-size:0.85rem; font-weight:700; color:${isOcc ? (isExcl ? "#f87171" : "#34d399") : "var(--text-muted)"};">
+            ${isOcc ? (isExcl ? "⚠️ MASK TRIGGERED" : "👤 OCCUPIED") : "⚪ CLEAR"}
           </span>
         </div>
       `;
+
+      const btnToggleMode = stepContent.querySelector("#btnToggleZoneMode");
+      if (btnToggleMode) {
+        btnToggleMode.addEventListener("click", () => {
+          const modeEntity = ent[`zone${curZ}_mode`];
+          const curState = (this._hass && this._hass.states[modeEntity]) ? this._hass.states[modeEntity].state : (isExcl ? "Exclusion" : "Detection");
+          const newMode = (curState === "Exclusion") ? "Detection" : "Exclusion";
+          this._setSelect(modeEntity, newMode);
+          this._showToast(`Zone ${curZ} mode set to ${newMode}.`);
+          this._lastRenderedZone = null;
+          setTimeout(() => {
+            this._renderZoneCardsAndStepper();
+            this._updateViewfinder();
+          }, 150);
+        });
+      }
 
       const btnC1 = stepContent.querySelector("#btnCaptureCorner1");
       if (btnC1) {
@@ -3050,14 +3145,27 @@ class RadarCalibrationCard extends HTMLElement {
         this._updateViewfinder();
       }
 
+      // Non-destructive update of mode button and description when not re-rendering
+      const btnToggle = stepContent.querySelector("#btnToggleZoneMode");
+      const modeDesc = stepContent.querySelector("#zoneModeDesc");
+      if (btnToggle) {
+        btnToggle.className = isExcl ? "btn-danger" : "btn-primary";
+        btnToggle.textContent = isExcl ? "🛡️ Mode: Exclusion" : "🎯 Mode: Detection";
+      }
+      if (modeDesc) {
+        modeDesc.textContent = isExcl
+          ? "🔴 Exclusion Mask — targets inside are ignored (fans, robot vacuums, pets)"
+          : "🟢 Detection Zone — tracks occupants, presence memory & counts";
+      }
+
       // Non-destructive update of status pill when not re-rendering
       const pill = stepContent.querySelector("#zoneLiveVerifPill");
       const box = stepContent.querySelector("#zoneLiveVerifBox");
       if (pill && box) {
-        pill.textContent = isOcc ? "👤 OCCUPIED" : "⚪ CLEAR";
-        pill.style.color = isOcc ? "#34d399" : "var(--text-muted)";
-        box.style.background = isOcc ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.04)";
-        box.style.borderColor = isOcc ? "rgba(16, 185, 129, 0.4)" : "var(--border-color)";
+        pill.textContent = isOcc ? (isExcl ? "⚠️ MASK TRIGGERED" : "👤 OCCUPIED") : "⚪ CLEAR";
+        pill.style.color = isOcc ? (isExcl ? "#f87171" : "#34d399") : "var(--text-muted)";
+        box.style.background = isOcc ? (isExcl ? "rgba(239, 68, 68, 0.15)" : "rgba(16, 185, 129, 0.15)") : "rgba(255, 255, 255, 0.04)";
+        box.style.borderColor = isOcc ? (isExcl ? "rgba(239, 68, 68, 0.4)" : "rgba(16, 185, 129, 0.4)") : "var(--border-color)";
       }
     }
   }
@@ -3088,4 +3196,4 @@ if (!customElements.get("presence-calibration-card")) {
   customElements.define("presence-calibration-card", RadarCalibrationCard);
 }
 
-console.log("[PRESENCE-RADAR-CARDS] v1.6.1 High-Precision mmWave Radar Suite initialized.");
+console.log("[PRESENCE-RADAR-CARDS] v1.7.3 High-Precision mmWave Radar Suite initialized.");

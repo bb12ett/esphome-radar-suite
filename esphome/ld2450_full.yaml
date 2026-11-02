@@ -1,7 +1,7 @@
 # ====================================================================
 # SHARED BASE: Hi-Link LD2450 mmWave Radar + Bluetooth Proxy (BLE)
-# Everything Presence Lite Architecture + 4 Detection Zones + 3 Hardware
-# Exclusion Zones + "Stationary Presence Memory" + One-Touch Zone Calibrator
+# Everything Presence Lite Architecture + 10 Multi-Mode Software Zones
+# (Detection / Exclusion) + "Stationary Presence Memory" + Zone Calibrator
 # Optimized for ESP32 / ESP32-C3 + Home Assistant
 # ====================================================================
 
@@ -9,6 +9,7 @@ substitutions:
   board: "esp32-c3-devkitm-1"
   tx_pin: "GPIO21"
   rx_pin: "GPIO20"
+  default_zones: "4"
 
 esphome:
   name: "${node_name}"
@@ -86,7 +87,7 @@ binary_sensor:
     device_class: occupancy
     icon: "mdi:motion-sensor"
 
-  # 4 Detection Zones (Managed by Presence Memory Tracker)
+  # 10 Multi-Mode Zones (Managed by Presence Memory Tracker)
   - platform: template
     name: "Zone 1 Occupancy"
     id: zone_1_occupancy
@@ -108,6 +109,42 @@ binary_sensor:
   - platform: template
     name: "Zone 4 Occupancy"
     id: zone_4_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 5 Occupancy"
+    id: zone_5_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 6 Occupancy"
+    id: zone_6_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 7 Occupancy"
+    id: zone_7_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 8 Occupancy"
+    id: zone_8_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 9 Occupancy"
+    id: zone_9_occupancy
+    device_class: occupancy
+    icon: "mdi:vector-square"
+
+  - platform: template
+    name: "Zone 10 Occupancy"
+    id: zone_10_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
 
@@ -139,6 +176,42 @@ binary_sensor:
   - platform: template
     name: "Zone 4 Memory Active"
     id: z4_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 5 Memory Active"
+    id: z5_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 6 Memory Active"
+    id: z6_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 7 Memory Active"
+    id: z7_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 8 Memory Active"
+    id: z8_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 9 Memory Active"
+    id: z9_stationary_latched
+    entity_category: diagnostic
+    icon: "mdi:brain"
+
+  - platform: template
+    name: "Zone 10 Memory Active"
+    id: z10_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
 
@@ -291,6 +364,42 @@ sensor:
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
 
+  - platform: template
+    name: "Zone 5 Target Count"
+    id: z5_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 6 Target Count"
+    id: z6_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 7 Target Count"
+    id: z7_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 8 Target Count"
+    id: z8_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 9 Target Count"
+    id: z9_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zone 10 Target Count"
+    id: z10_target_count
+    icon: "mdi:map-marker-account"
+    accuracy_decimals: 0
+
   # Diagnostics & Network
   - platform: wifi_signal
     name: "Wi-Fi Signal"
@@ -334,52 +443,26 @@ text_sensor:
 # --------------------------------------------------------------------
 number:
   # Room Presence Timeout (Used when target physically exits the room)
-  # Plus Hardware Mask / Exclusion Zones 1-3 (stored in LD2450 NVRAM when Zone Type = Filter)
   - platform: ld2450
     ld2450_id: ld2450_radar
     presence_timeout:
       name: "Presence Timeout"
       id: presence_timeout_num
       mode: box
-    zone_1:
-      x1:
-        name: "Exclusion Zone 1 X1"
-        mode: box
-      y1:
-        name: "Exclusion Zone 1 Y1"
-        mode: box
-      x2:
-        name: "Exclusion Zone 1 X2"
-        mode: box
-      y2:
-        name: "Exclusion Zone 1 Y2"
-        mode: box
-    zone_2:
-      x1:
-        name: "Exclusion Zone 2 X1"
-        mode: box
-      y1:
-        name: "Exclusion Zone 2 Y1"
-        mode: box
-      x2:
-        name: "Exclusion Zone 2 X2"
-        mode: box
-      y2:
-        name: "Exclusion Zone 2 Y2"
-        mode: box
-    zone_3:
-      x1:
-        name: "Exclusion Zone 3 X1"
-        mode: box
-      y1:
-        name: "Exclusion Zone 3 Y1"
-        mode: box
-      x2:
-        name: "Exclusion Zone 3 X2"
-        mode: box
-      y2:
-        name: "Exclusion Zone 3 Y2"
-        mode: box
+
+  # Dynamic Active Zone Count (1 to 10)
+  - platform: template
+    name: "Active Zones"
+    id: active_zones_count
+    entity_category: config
+    icon: "mdi:numeric"
+    min_value: 1
+    max_value: 10
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: ${default_zones}
 
   # Zone Off Delay / Hold Time when person physically leaves the zone
   - platform: template
@@ -463,7 +546,7 @@ number:
     name: "Sensor Mounting Angle"
     id: sensor_mounting_angle
     entity_category: config
-    unit_of_measurement: "°"
+    unit_of_measurement: "Â°"
     icon: "mdi:rotate-3d-variant"
     min_value: -90
     max_value: 90
@@ -624,6 +707,90 @@ number:
   - platform: template
     name: "Zone 4 Angle"
     id: z4_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 5 Angle"
+    id: z5_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 6 Angle"
+    id: z6_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 7 Angle"
+    id: z7_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 8 Angle"
+    id: z8_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 9 Angle"
+    id: z9_angle
+    entity_category: config
+    unit_of_measurement: "°"
+    icon: "mdi:angle-acute"
+    min_value: -90
+    max_value: 90
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  - platform: template
+    name: "Zone 10 Angle"
+    id: z10_angle
     entity_category: config
     unit_of_measurement: "°"
     icon: "mdi:angle-acute"
@@ -867,14 +1034,360 @@ number:
     restore_value: true
     initial_value: 0
 
+  # Detection Zone 5 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 5 X1"
+    id: z5_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 5 Y1"
+    id: z5_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 5 X2"
+    id: z5_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 5 Y2"
+    id: z5_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 6 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 6 X1"
+    id: z6_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 6 Y1"
+    id: z6_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 6 X2"
+    id: z6_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 6 Y2"
+    id: z6_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 7 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 7 X1"
+    id: z7_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 7 Y1"
+    id: z7_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 7 X2"
+    id: z7_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 7 Y2"
+    id: z7_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 8 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 8 X1"
+    id: z8_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 8 Y1"
+    id: z8_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 8 X2"
+    id: z8_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 8 Y2"
+    id: z8_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 9 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 9 X1"
+    id: z9_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 9 Y1"
+    id: z9_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 9 X2"
+    id: z9_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 9 Y2"
+    id: z9_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+  # Detection Zone 10 Coordinates (ESP32 NVRAM)
+  - platform: template
+    name: "Zone 10 X1"
+    id: z10_x1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 10 Y1"
+    id: z10_y1
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-top-left"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 10 X2"
+    id: z10_x2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right-bold-box-outline"
+    min_value: -10000
+    max_value: 10000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    name: "Zone 10 Y2"
+    id: z10_y2
+    entity_category: config
+    device_class: distance
+    unit_of_measurement: "mm"
+    icon: "mdi:arrow-bottom-right"
+    min_value: 0
+    max_value: 15000
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
 # --------------------------------------------------------------------
 # 7. RADAR MODE SELECTORS & SWITCHES
 # --------------------------------------------------------------------
 select:
   - platform: ld2450
     ld2450_id: ld2450_radar
-    zone_type:
-      name: "Hardware Exclusion Mode"
     baud_rate:
       name: "Radar Baud Rate"
 
@@ -888,8 +1401,135 @@ select:
       - "Zone 2"
       - "Zone 3"
       - "Zone 4"
+      - "Zone 5"
+      - "Zone 6"
+      - "Zone 7"
+      - "Zone 8"
+      - "Zone 9"
+      - "Zone 10"
       - "Room Boundary"
     initial_option: "Zone 1"
+
+  # Zone Mode Selectors (Detection vs Exclusion)
+  - platform: template
+    name: "Zone 1 Mode"
+    id: z1_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 2 Mode"
+    id: z2_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 3 Mode"
+    id: z3_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 4 Mode"
+    id: z4_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 5 Mode"
+    id: z5_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 6 Mode"
+    id: z6_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 7 Mode"
+    id: z7_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 8 Mode"
+    id: z8_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 9 Mode"
+    id: z9_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    name: "Zone 10 Mode"
+    id: z10_mode
+    entity_category: config
+    icon: "mdi:shape-outline"
+    options:
+      - "Detection"
+      - "Exclusion"
+    initial_option: "Detection"
+    optimistic: true
+    restore_value: true
 
 switch:
   - platform: ld2450
@@ -938,7 +1578,7 @@ button:
     on_press:
       - lambda: |-
           int z_idx = id(calibrate_zone_select).active_index().value_or(0);
-          std::string sel = (z_idx == 4) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
+          std::string sel = (z_idx == 10) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
 
           float mount_yaw = id(sensor_mounting_angle).state;
           bool radar_has_target = id(raw_room_occupancy).state;
@@ -994,7 +1634,7 @@ button:
     on_press:
       - lambda: |-
           int z_idx = id(calibrate_zone_select).active_index().value_or(0);
-          std::string sel = (z_idx == 4) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
+          std::string sel = (z_idx == 10) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
 
           if (!esphome::presence_memory::g_calibrator.point_a[z_idx].set) {
             id(zone_calibration_status).publish_state("Please press 'Set Zone Corner 1' first!");
@@ -1052,16 +1692,32 @@ button:
             }
 
             auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
-              // Clamp to the entity's range so a write is never silently rejected
               val = std::max(num->traits.get_min_value(), std::min(num->traits.get_max_value(), val));
               auto call = num->make_call();
               call.set_value(val);
               call.perform();
             };
 
+            esphome::template_::TemplateNumber *coords[10][4] = {
+              {id(z1_x1), id(z1_y1), id(z1_x2), id(z1_y2)},
+              {id(z2_x1), id(z2_y1), id(z2_x2), id(z2_y2)},
+              {id(z3_x1), id(z3_y1), id(z3_x2), id(z3_y2)},
+              {id(z4_x1), id(z4_y1), id(z4_x2), id(z4_y2)},
+              {id(z5_x1), id(z5_y1), id(z5_x2), id(z5_y2)},
+              {id(z6_x1), id(z6_y1), id(z6_x2), id(z6_y2)},
+              {id(z7_x1), id(z7_y1), id(z7_x2), id(z7_y2)},
+              {id(z8_x1), id(z8_y1), id(z8_x2), id(z8_y2)},
+              {id(z9_x1), id(z9_y1), id(z9_x2), id(z9_y2)},
+              {id(z10_x1), id(z10_y1), id(z10_x2), id(z10_y2)}
+            };
+            esphome::template_::TemplateNumber *angles[10] = {
+              id(z1_angle), id(z2_angle), id(z3_angle), id(z4_angle), id(z5_angle),
+              id(z6_angle), id(z7_angle), id(z8_angle), id(z9_angle), id(z10_angle)
+            };
+
             float min_x = 0, max_x = 0, min_y = 0, max_y = 0;
 
-            if (z_idx == 4) {
+            if (z_idx == 10) {
               // Room Boundary (Axis-aligned outer perimeter)
               min_x = std::min(xa, xb) - pad;
               max_x = std::max(xa, xb) + pad;
@@ -1071,13 +1727,8 @@ button:
               set_num(id(room_y1), min_y);
               set_num(id(room_x2), max_x);
               set_num(id(room_y2), max_y);
-            } else {
-              float z_angle = 0.0f;
-              if (z_idx == 0) z_angle = id(z1_angle).state;
-              else if (z_idx == 1) z_angle = id(z2_angle).state;
-              else if (z_idx == 2) z_angle = id(z3_angle).state;
-              else if (z_idx == 3) z_angle = id(z4_angle).state;
-
+            } else if (z_idx >= 0 && z_idx < 10) {
+              float z_angle = angles[z_idx]->state;
               if (z_angle == 0.0f) {
                 min_x = std::min(xa, xb) - pad;
                 max_x = std::max(xa, xb) + pad;
@@ -1097,19 +1748,10 @@ button:
                 max_y = my + hh;
               }
 
-              if (z_idx == 0) {
-                set_num(id(z1_x1), min_x); set_num(id(z1_y1), min_y);
-                set_num(id(z1_x2), max_x); set_num(id(z1_y2), max_y);
-              } else if (z_idx == 1) {
-                set_num(id(z2_x1), min_x); set_num(id(z2_y1), min_y);
-                set_num(id(z2_x2), max_x); set_num(id(z2_y2), max_y);
-              } else if (z_idx == 2) {
-                set_num(id(z3_x1), min_x); set_num(id(z3_y1), min_y);
-                set_num(id(z3_x2), max_x); set_num(id(z3_y2), max_y);
-              } else if (z_idx == 3) {
-                set_num(id(z4_x1), min_x); set_num(id(z4_y1), min_y);
-                set_num(id(z4_x2), max_x); set_num(id(z4_y2), max_y);
-              }
+              set_num(coords[z_idx][0], min_x);
+              set_num(coords[z_idx][1], min_y);
+              set_num(coords[z_idx][2], max_x);
+              set_num(coords[z_idx][3], max_y);
             }
 
             // Commit immediately to ESP32 physical flash storage
@@ -1131,18 +1773,39 @@ button:
     on_press:
       - lambda: |-
           int z_idx = id(calibrate_zone_select).active_index().value_or(0);
-          std::string sel = (z_idx == 4) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
+          std::string sel = (z_idx == 10) ? "Room Boundary" : ("Zone " + esphome::to_string(z_idx + 1));
           esphome::presence_memory::g_calibrator.point_a[z_idx].set = false;
           auto set_num = [](esphome::template_::TemplateNumber *num, float val) {
             auto call = num->make_call();
             call.set_value(val);
             call.perform();
           };
-          if (z_idx == 0) { set_num(id(z1_x1), 0); set_num(id(z1_y1), 0); set_num(id(z1_x2), 0); set_num(id(z1_y2), 0); set_num(id(z1_angle), 0); }
-          else if (z_idx == 1) { set_num(id(z2_x1), 0); set_num(id(z2_y1), 0); set_num(id(z2_x2), 0); set_num(id(z2_y2), 0); set_num(id(z2_angle), 0); }
-          else if (z_idx == 2) { set_num(id(z3_x1), 0); set_num(id(z3_y1), 0); set_num(id(z3_x2), 0); set_num(id(z3_y2), 0); set_num(id(z3_angle), 0); }
-          else if (z_idx == 3) { set_num(id(z4_x1), 0); set_num(id(z4_y1), 0); set_num(id(z4_x2), 0); set_num(id(z4_y2), 0); set_num(id(z4_angle), 0); }
-          else if (z_idx == 4) { set_num(id(room_x1), 0); set_num(id(room_y1), 0); set_num(id(room_x2), 0); set_num(id(room_y2), 0); }
+
+          esphome::template_::TemplateNumber *coords[10][4] = {
+            {id(z1_x1), id(z1_y1), id(z1_x2), id(z1_y2)},
+            {id(z2_x1), id(z2_y1), id(z2_x2), id(z2_y2)},
+            {id(z3_x1), id(z3_y1), id(z3_x2), id(z3_y2)},
+            {id(z4_x1), id(z4_y1), id(z4_x2), id(z4_y2)},
+            {id(z5_x1), id(z5_y1), id(z5_x2), id(z5_y2)},
+            {id(z6_x1), id(z6_y1), id(z6_x2), id(z6_y2)},
+            {id(z7_x1), id(z7_y1), id(z7_x2), id(z7_y2)},
+            {id(z8_x1), id(z8_y1), id(z8_x2), id(z8_y2)},
+            {id(z9_x1), id(z9_y1), id(z9_x2), id(z9_y2)},
+            {id(z10_x1), id(z10_y1), id(z10_x2), id(z10_y2)}
+          };
+          esphome::template_::TemplateNumber *angles[10] = {
+            id(z1_angle), id(z2_angle), id(z3_angle), id(z4_angle), id(z5_angle),
+            id(z6_angle), id(z7_angle), id(z8_angle), id(z9_angle), id(z10_angle)
+          };
+
+          if (z_idx == 10) {
+            set_num(id(room_x1), 0); set_num(id(room_y1), 0);
+            set_num(id(room_x2), 0); set_num(id(room_y2), 0);
+          } else if (z_idx >= 0 && z_idx < 10) {
+            set_num(coords[z_idx][0], 0); set_num(coords[z_idx][1], 0);
+            set_num(coords[z_idx][2], 0); set_num(coords[z_idx][3], 0);
+            set_num(angles[z_idx], 0);
+          }
           global_preferences->sync();
           char buf[64];
           snprintf(buf, sizeof(buf), "%s cleared (disabled).", sel.c_str());
@@ -1164,7 +1827,7 @@ button:
 
           // Targets are rotated by the mounting angle before the boundary check, so the walls
           // relative to the sensor are the same for every angle. The sensor sits on the front wall
-          // at (width/2 + offset_x). A true corner mount (offset = ±width/2) gives [0, w] or [-w, 0].
+          // at (width/2 + offset_x). A true corner mount (offset = Â±width/2) gives [0, w] or [-w, 0].
           min_x = -(w * 0.5f + off_x);
           max_x = +(w * 0.5f - off_x);
           min_y = 0.0f;
@@ -1197,7 +1860,7 @@ interval:
     then:
       - lambda: |-
           static esphome::presence_memory::RoomTracker s_room;
-          static esphome::presence_memory::ZoneTracker s_zones[4];
+          static esphome::presence_memory::ZoneTracker s_zones[10];
 
           esphome::presence_memory::TargetData targets[3];
           bool radar_has_target = id(raw_room_occupancy).state;
@@ -1233,7 +1896,7 @@ interval:
           setup_target(targets[1], id(t2_x), id(t2_y), id(t2_dist), id(t2_speed), id(t2_angle));
           setup_target(targets[2], id(t3_x), id(t3_y), id(t3_dist), id(t3_speed), id(t3_angle));
 
-          // Room boundary filter: Drop targets physically outside the room walls
+          // 1. Room boundary filter: Drop targets physically outside the room walls
           float rx1 = id(room_x1).state, ry1 = id(room_y1).state;
           float rx2 = id(room_x2).state, ry2 = id(room_y2).state;
           esphome::presence_memory::RoomBounds room = esphome::presence_memory::make_room_bounds(rx1, ry1, rx2, ry2);
@@ -1242,6 +1905,45 @@ interval:
               if (targets[i].active) {
                 if (targets[i].x < room.min_x || targets[i].x > room.max_x ||
                     targets[i].y < room.min_y || targets[i].y > room.max_y) {
+                  targets[i].active = false;
+                }
+              }
+            }
+          }
+
+          int active_n = std::max(1, std::min(10, (int)id(active_zones_count).state));
+
+          float z_coords[10][4] = {
+            {id(z1_x1).state, id(z1_y1).state, id(z1_x2).state, id(z1_y2).state},
+            {id(z2_x1).state, id(z2_y1).state, id(z2_x2).state, id(z2_y2).state},
+            {id(z3_x1).state, id(z3_y1).state, id(z3_x2).state, id(z3_y2).state},
+            {id(z4_x1).state, id(z4_y1).state, id(z4_x2).state, id(z4_y2).state},
+            {id(z5_x1).state, id(z5_y1).state, id(z5_x2).state, id(z5_y2).state},
+            {id(z6_x1).state, id(z6_y1).state, id(z6_x2).state, id(z6_y2).state},
+            {id(z7_x1).state, id(z7_y1).state, id(z7_x2).state, id(z7_y2).state},
+            {id(z8_x1).state, id(z8_y1).state, id(z8_x2).state, id(z8_y2).state},
+            {id(z9_x1).state, id(z9_y1).state, id(z9_x2).state, id(z9_y2).state},
+            {id(z10_x1).state, id(z10_y1).state, id(z10_x2).state, id(z10_y2).state}
+          };
+          float z_angles[10] = {
+            id(z1_angle).state, id(z2_angle).state, id(z3_angle).state, id(z4_angle).state, id(z5_angle).state,
+            id(z6_angle).state, id(z7_angle).state, id(z8_angle).state, id(z9_angle).state, id(z10_angle).state
+          };
+          bool z_is_excl[10] = {
+            id(z1_mode).active_index().value_or(0) == 1, id(z2_mode).active_index().value_or(0) == 1,
+            id(z3_mode).active_index().value_or(0) == 1, id(z4_mode).active_index().value_or(0) == 1,
+            id(z5_mode).active_index().value_or(0) == 1, id(z6_mode).active_index().value_or(0) == 1,
+            id(z7_mode).active_index().value_or(0) == 1, id(z8_mode).active_index().value_or(0) == 1,
+            id(z9_mode).active_index().value_or(0) == 1, id(z10_mode).active_index().value_or(0) == 1
+          };
+
+          // 2. Exclusion Zones Masking (Prunes false-positive targets before detection zones & room tracker)
+          for (int z = 0; z < active_n; z++) {
+            if (z_is_excl[z]) {
+              s_zones[z].update_exclusion(z_coords[z][0], z_coords[z][1], z_coords[z][2], z_coords[z][3], z_angles[z], targets);
+              for (int i = 0; i < 3; i++) {
+                if (targets[i].active && esphome::presence_memory::is_point_in_zone(
+                        z_coords[z][0], z_coords[z][1], z_coords[z][2], z_coords[z][3], z_angles[z], targets[i].x, targets[i].y)) {
                   targets[i].active = false;
                 }
               }
@@ -1277,60 +1979,54 @@ interval:
             }
           }
 
-          // 1. Zone 1 Tracker Update
-          s_zones[0].update(id(z1_x1).state, id(z1_y1).state, id(z1_x2).state, id(z1_y2).state, id(z1_angle).state,
-                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
-          if (!id(zone_1_occupancy).has_state() || id(zone_1_occupancy).state != s_zones[0].occupied) {
-            id(zone_1_occupancy).publish_state(s_zones[0].occupied);
-          }
-          if (!id(z1_stationary_latched).has_state() || id(z1_stationary_latched).state != s_zones[0].latched) {
-            id(z1_stationary_latched).publish_state(s_zones[0].latched);
-          }
-          if (!id(z1_target_count).has_state() || id(z1_target_count).state != s_zones[0].target_count) {
-            id(z1_target_count).publish_state(s_zones[0].target_count);
+          // 3. Detection Zones Update
+          for (int z = 0; z < active_n; z++) {
+            if (!z_is_excl[z]) {
+              s_zones[z].update(z_coords[z][0], z_coords[z][1], z_coords[z][2], z_coords[z][3], z_angles[z],
+                                targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
+            }
           }
 
-          // 2. Zone 2 Tracker Update
-          s_zones[1].update(id(z2_x1).state, id(z2_y1).state, id(z2_x2).state, id(z2_y2).state, id(z2_angle).state,
-                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
-          if (!id(zone_2_occupancy).has_state() || id(zone_2_occupancy).state != s_zones[1].occupied) {
-            id(zone_2_occupancy).publish_state(s_zones[1].occupied);
+          // 4. Publish Zone Binary Sensors & Target Counts
+          esphome::binary_sensor::BinarySensor *occ_sensors[10] = {
+            id(zone_1_occupancy), id(zone_2_occupancy), id(zone_3_occupancy), id(zone_4_occupancy), id(zone_5_occupancy),
+            id(zone_6_occupancy), id(zone_7_occupancy), id(zone_8_occupancy), id(zone_9_occupancy), id(zone_10_occupancy)
+          };
+          esphome::binary_sensor::BinarySensor *latch_sensors[10] = {
+            id(z1_stationary_latched), id(z2_stationary_latched), id(z3_stationary_latched), id(z4_stationary_latched), id(z5_stationary_latched),
+            id(z6_stationary_latched), id(z7_stationary_latched), id(z8_stationary_latched), id(z9_stationary_latched), id(z10_stationary_latched)
+          };
+          esphome::sensor::Sensor *count_sensors[10] = {
+            id(z1_target_count), id(z2_target_count), id(z3_target_count), id(z4_target_count), id(z5_target_count),
+            id(z6_target_count), id(z7_target_count), id(z8_target_count), id(z9_target_count), id(z10_target_count)
+          };
+
+          for (int z = 0; z < active_n; z++) {
+            if (!occ_sensors[z]->has_state() || occ_sensors[z]->state != s_zones[z].occupied) {
+              occ_sensors[z]->publish_state(s_zones[z].occupied);
+            }
+            if (!latch_sensors[z]->has_state() || latch_sensors[z]->state != s_zones[z].latched) {
+              latch_sensors[z]->publish_state(s_zones[z].latched);
+            }
+            if (!count_sensors[z]->has_state() || count_sensors[z]->state != s_zones[z].target_count) {
+              count_sensors[z]->publish_state(s_zones[z].target_count);
+            }
           }
-          if (!id(z2_stationary_latched).has_state() || id(z2_stationary_latched).state != s_zones[1].latched) {
-            id(z2_stationary_latched).publish_state(s_zones[1].latched);
-          }
-          if (!id(z2_target_count).has_state() || id(z2_target_count).state != s_zones[1].target_count) {
-            id(z2_target_count).publish_state(s_zones[1].target_count);
+          for (int z = active_n; z < 10; z++) {
+            if (occ_sensors[z]->has_state() && occ_sensors[z]->state) occ_sensors[z]->publish_state(false);
+            if (latch_sensors[z]->has_state() && latch_sensors[z]->state) latch_sensors[z]->publish_state(false);
+            if (count_sensors[z]->has_state() && count_sensors[z]->state != 0) count_sensors[z]->publish_state(0);
           }
 
-          // 3. Zone 3 Tracker Update
-          s_zones[2].update(id(z3_x1).state, id(z3_y1).state, id(z3_x2).state, id(z3_y2).state, id(z3_angle).state,
-                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
-          if (!id(zone_3_occupancy).has_state() || id(zone_3_occupancy).state != s_zones[2].occupied) {
-            id(zone_3_occupancy).publish_state(s_zones[2].occupied);
-          }
-          if (!id(z3_stationary_latched).has_state() || id(z3_stationary_latched).state != s_zones[2].latched) {
-            id(z3_stationary_latched).publish_state(s_zones[2].latched);
-          }
-          if (!id(z3_target_count).has_state() || id(z3_target_count).state != s_zones[2].target_count) {
-            id(z3_target_count).publish_state(s_zones[2].target_count);
+          // 5. Room Tracker Update (Only active Detection zones can hold room occupancy via latch)
+          bool any_zone_latched = false;
+          for (int z = 0; z < active_n; z++) {
+            if (!z_is_excl[z] && s_zones[z].latched) {
+              any_zone_latched = true;
+              break;
+            }
           }
 
-          // 4. Zone 4 Tracker Update
-          s_zones[3].update(id(z4_x1).state, id(z4_y1).state, id(z4_x2).state, id(z4_y2).state, id(z4_angle).state,
-                            targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
-          if (!id(zone_4_occupancy).has_state() || id(zone_4_occupancy).state != s_zones[3].occupied) {
-            id(zone_4_occupancy).publish_state(s_zones[3].occupied);
-          }
-          if (!id(z4_stationary_latched).has_state() || id(z4_stationary_latched).state != s_zones[3].latched) {
-            id(z4_stationary_latched).publish_state(s_zones[3].latched);
-          }
-          if (!id(z4_target_count).has_state() || id(z4_target_count).state != s_zones[3].target_count) {
-            id(z4_target_count).publish_state(s_zones[3].target_count);
-          }
-
-          // 5. Room Tracker Update (Evaluated with room boundary and zone latches)
-          bool any_zone_latched = s_zones[0].latched || s_zones[1].latched || s_zones[2].latched || s_zones[3].latched;
           s_room.update(targets, max_d, room, vanish_prot, room_timeout, latch_timeout_min, exit_margin, any_zone_latched);
           if (!id(room_occupancy).has_state() || id(room_occupancy).state != s_room.occupied) {
             id(room_occupancy).publish_state(s_room.occupied);

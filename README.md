@@ -33,7 +33,8 @@ Eliminate brittle 200-line Plotly YAML configurations and third-party phone apps
 - **Walk-in Auto-Calibration**: Walk to Corner 1 $\rightarrow$ Click **Capture Corner 1** $\rightarrow$ Walk to Corner 2 $\rightarrow$ Click **Capture Corner 2 & Save**. The card calculates the bounding box and writes directly to ESP32 NVRAM.
 - **Manual Coordinate Entry & Nudges**: Direct numeric inputs for `X1`, `Y1`, `X2`, `Y2`, and `Angle (°)`, with quick $\pm50\text{mm}$ and $\pm5^\circ$ nudge buttons.
 - **Live Typing Feedback**: Typing new coordinates instantly moves and rotates the zone polygon on the map before saving.
-- **Hardware Exclusion Masks**: Configure the LD2450's hardware exclusion zones (ceiling fans, curtains) and view them rendered on the map as dashed red boundary polygons.
+- **Multi-Mode Software Zones (Up to 10 Zones)**: Configure up to 10 independent zones, each selectable as **Detection Zone** (tracks occupants, presence memory & counts) or **Exclusion Mask** (ignores fans, robot vacuums, pets), rendered with dashed red hatching.
+- **Automatic Home Assistant Entity Visibility Sync**: Unused zone entities automatically collapse into the hidden entities section on the device page with zero integration reload or network downtime.
 - **Mobile Keyboard Preservation**: Designed with single-render state management so high-frequency 10Hz telemetry updates never close the mobile virtual keyboard or drop text focus.
 
 ---
