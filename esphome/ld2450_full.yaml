@@ -9,7 +9,6 @@ substitutions:
   board: "esp32-c3-devkitm-1"
   tx_pin: "GPIO21"
   rx_pin: "GPIO20"
-  default_zones: "4"
 
 esphome:
   name: "${node_name}"
@@ -93,60 +92,70 @@ binary_sensor:
     id: zone_1_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 2 Occupancy"
     id: zone_2_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 3 Occupancy"
     id: zone_3_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 4 Occupancy"
     id: zone_4_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 5 Occupancy"
     id: zone_5_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 6 Occupancy"
     id: zone_6_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 7 Occupancy"
     id: zone_7_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 8 Occupancy"
     id: zone_8_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 9 Occupancy"
     id: zone_9_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 10 Occupancy"
     id: zone_10_occupancy
     device_class: occupancy
     icon: "mdi:vector-square"
+    disabled_by_default: true
 
   # Diagnostics: Visual feedback when "Stationary Presence Memory" is holding the state
   - platform: template
@@ -160,60 +169,70 @@ binary_sensor:
     id: z1_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 2 Memory Active"
     id: z2_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 3 Memory Active"
     id: z3_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 4 Memory Active"
     id: z4_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 5 Memory Active"
     id: z5_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 6 Memory Active"
     id: z6_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 7 Memory Active"
     id: z7_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 8 Memory Active"
     id: z8_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 9 Memory Active"
     id: z9_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 10 Memory Active"
     id: z10_stationary_latched
     entity_category: diagnostic
     icon: "mdi:brain"
+    disabled_by_default: true
 
 # --------------------------------------------------------------------
 # 4. TARGET COORDINATES, COUNTS & ZONE SENSORS
@@ -345,60 +364,70 @@ sensor:
     id: z1_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 2 Target Count"
     id: z2_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 3 Target Count"
     id: z3_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 4 Target Count"
     id: z4_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 5 Target Count"
     id: z5_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 6 Target Count"
     id: z6_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 7 Target Count"
     id: z7_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 8 Target Count"
     id: z8_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 9 Target Count"
     id: z9_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 10 Target Count"
     id: z10_target_count
     icon: "mdi:map-marker-account"
     accuracy_decimals: 0
+    disabled_by_default: true
 
   # Diagnostics & Network
   - platform: wifi_signal
@@ -449,20 +478,6 @@ number:
       name: "Presence Timeout"
       id: presence_timeout_num
       mode: box
-
-  # Dynamic Active Zone Count (1 to 10)
-  - platform: template
-    name: "Active Zones"
-    id: active_zones_count
-    entity_category: config
-    icon: "mdi:numeric"
-    min_value: 1
-    max_value: 10
-    step: 1
-    mode: box
-    optimistic: true
-    restore_value: true
-    initial_value: ${default_zones}
 
   # Zone Off Delay / Hold Time when person physically leaves the zone
   - platform: template
@@ -675,6 +690,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 2 Angle"
@@ -689,6 +705,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 3 Angle"
@@ -703,6 +720,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 4 Angle"
@@ -717,6 +735,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 5 Angle"
@@ -731,6 +750,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 6 Angle"
@@ -745,6 +765,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 7 Angle"
@@ -759,6 +780,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 8 Angle"
@@ -773,6 +795,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 9 Angle"
@@ -787,6 +810,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 10 Angle"
@@ -801,6 +825,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 1 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -817,6 +842,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 1 Y1"
     id: z1_y1
@@ -831,6 +857,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 1 X2"
     id: z1_x2
@@ -845,6 +872,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 1 Y2"
     id: z1_y2
@@ -859,6 +887,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 2 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -875,6 +904,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 2 Y1"
     id: z2_y1
@@ -889,6 +919,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 2 X2"
     id: z2_x2
@@ -903,6 +934,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 2 Y2"
     id: z2_y2
@@ -917,6 +949,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 3 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -933,6 +966,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 3 Y1"
     id: z3_y1
@@ -947,6 +981,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 3 X2"
     id: z3_x2
@@ -961,6 +996,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 3 Y2"
     id: z3_y2
@@ -975,6 +1011,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 4 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -991,6 +1028,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 4 Y1"
     id: z4_y1
@@ -1005,6 +1043,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 4 X2"
     id: z4_x2
@@ -1019,6 +1058,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 4 Y2"
     id: z4_y2
@@ -1033,6 +1073,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 5 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -1049,6 +1090,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 5 Y1"
     id: z5_y1
@@ -1063,6 +1105,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 5 X2"
     id: z5_x2
@@ -1077,6 +1120,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 5 Y2"
     id: z5_y2
@@ -1091,6 +1135,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 6 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -1107,6 +1152,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 6 Y1"
     id: z6_y1
@@ -1121,6 +1167,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 6 X2"
     id: z6_x2
@@ -1135,6 +1182,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 6 Y2"
     id: z6_y2
@@ -1149,6 +1197,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 7 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -1165,6 +1214,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 7 Y1"
     id: z7_y1
@@ -1179,6 +1229,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 7 X2"
     id: z7_x2
@@ -1193,6 +1244,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 7 Y2"
     id: z7_y2
@@ -1207,6 +1259,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 8 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -1223,6 +1276,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 8 Y1"
     id: z8_y1
@@ -1237,6 +1291,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 8 X2"
     id: z8_x2
@@ -1251,6 +1306,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 8 Y2"
     id: z8_y2
@@ -1265,6 +1321,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 9 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -1281,6 +1338,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 9 Y1"
     id: z9_y1
@@ -1295,6 +1353,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 9 X2"
     id: z9_x2
@@ -1309,6 +1368,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 9 Y2"
     id: z9_y2
@@ -1323,6 +1383,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
   # Detection Zone 10 Coordinates (ESP32 NVRAM)
   - platform: template
@@ -1339,6 +1400,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 10 Y1"
     id: z10_y1
@@ -1353,6 +1415,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 10 X2"
     id: z10_x2
@@ -1367,6 +1430,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
   - platform: template
     name: "Zone 10 Y2"
     id: z10_y2
@@ -1381,6 +1445,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    disabled_by_default: true
 
 # --------------------------------------------------------------------
 # 7. RADAR MODE SELECTORS & SWITCHES
@@ -1422,6 +1487,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 2 Mode"
@@ -1434,6 +1500,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 3 Mode"
@@ -1446,6 +1513,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 4 Mode"
@@ -1458,6 +1526,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 5 Mode"
@@ -1470,6 +1539,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 6 Mode"
@@ -1482,6 +1552,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 7 Mode"
@@ -1494,6 +1565,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 8 Mode"
@@ -1506,6 +1578,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 9 Mode"
@@ -1518,6 +1591,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
   - platform: template
     name: "Zone 10 Mode"
@@ -1530,6 +1604,7 @@ select:
     initial_option: "Detection"
     optimistic: true
     restore_value: true
+    disabled_by_default: true
 
 switch:
   - platform: ld2450
@@ -1911,8 +1986,6 @@ interval:
             }
           }
 
-          int active_n = std::max(1, std::min(10, (int)id(active_zones_count).state));
-
           float z_coords[10][4] = {
             {id(z1_x1).state, id(z1_y1).state, id(z1_x2).state, id(z1_y2).state},
             {id(z2_x1).state, id(z2_y1).state, id(z2_x2).state, id(z2_y2).state},
@@ -1937,9 +2010,14 @@ interval:
             id(z9_mode).active_index().value_or(0) == 1, id(z10_mode).active_index().value_or(0) == 1
           };
 
+          bool z_configured[10];
+          for (int z = 0; z < 10; z++) {
+            z_configured[z] = !(z_coords[z][0] == 0 && z_coords[z][1] == 0 && z_coords[z][2] == 0 && z_coords[z][3] == 0);
+          }
+
           // 2. Exclusion Zones Masking (Prunes false-positive targets before detection zones & room tracker)
-          for (int z = 0; z < active_n; z++) {
-            if (z_is_excl[z]) {
+          for (int z = 0; z < 10; z++) {
+            if (z_configured[z] && z_is_excl[z]) {
               s_zones[z].update_exclusion(z_coords[z][0], z_coords[z][1], z_coords[z][2], z_coords[z][3], z_angles[z], targets);
               for (int i = 0; i < 3; i++) {
                 if (targets[i].active && esphome::presence_memory::is_point_in_zone(
@@ -1980,8 +2058,8 @@ interval:
           }
 
           // 3. Detection Zones Update
-          for (int z = 0; z < active_n; z++) {
-            if (!z_is_excl[z]) {
+          for (int z = 0; z < 10; z++) {
+            if (z_configured[z] && !z_is_excl[z]) {
               s_zones[z].update(z_coords[z][0], z_coords[z][1], z_coords[z][2], z_coords[z][3], z_angles[z],
                                 targets, room, max_d, vanish_prot, zone_hold, latch_timeout_min, exit_margin);
             }
@@ -2001,27 +2079,28 @@ interval:
             id(z6_target_count), id(z7_target_count), id(z8_target_count), id(z9_target_count), id(z10_target_count)
           };
 
-          for (int z = 0; z < active_n; z++) {
-            if (!occ_sensors[z]->has_state() || occ_sensors[z]->state != s_zones[z].occupied) {
-              occ_sensors[z]->publish_state(s_zones[z].occupied);
+          for (int z = 0; z < 10; z++) {
+            if (z_configured[z]) {
+              if (!occ_sensors[z]->has_state() || occ_sensors[z]->state != s_zones[z].occupied) {
+                occ_sensors[z]->publish_state(s_zones[z].occupied);
+              }
+              if (!latch_sensors[z]->has_state() || latch_sensors[z]->state != s_zones[z].latched) {
+                latch_sensors[z]->publish_state(s_zones[z].latched);
+              }
+              if (!count_sensors[z]->has_state() || count_sensors[z]->state != s_zones[z].target_count) {
+                count_sensors[z]->publish_state(s_zones[z].target_count);
+              }
+            } else {
+              if (occ_sensors[z]->has_state() && occ_sensors[z]->state) occ_sensors[z]->publish_state(false);
+              if (latch_sensors[z]->has_state() && latch_sensors[z]->state) latch_sensors[z]->publish_state(false);
+              if (count_sensors[z]->has_state() && count_sensors[z]->state != 0) count_sensors[z]->publish_state(0);
             }
-            if (!latch_sensors[z]->has_state() || latch_sensors[z]->state != s_zones[z].latched) {
-              latch_sensors[z]->publish_state(s_zones[z].latched);
-            }
-            if (!count_sensors[z]->has_state() || count_sensors[z]->state != s_zones[z].target_count) {
-              count_sensors[z]->publish_state(s_zones[z].target_count);
-            }
-          }
-          for (int z = active_n; z < 10; z++) {
-            if (occ_sensors[z]->has_state() && occ_sensors[z]->state) occ_sensors[z]->publish_state(false);
-            if (latch_sensors[z]->has_state() && latch_sensors[z]->state) latch_sensors[z]->publish_state(false);
-            if (count_sensors[z]->has_state() && count_sensors[z]->state != 0) count_sensors[z]->publish_state(0);
           }
 
           // 5. Room Tracker Update (Only active Detection zones can hold room occupancy via latch)
           bool any_zone_latched = false;
-          for (int z = 0; z < active_n; z++) {
-            if (!z_is_excl[z] && s_zones[z].latched) {
+          for (int z = 0; z < 10; z++) {
+            if (z_configured[z] && !z_is_excl[z] && s_zones[z].latched) {
               any_zone_latched = true;
               break;
             }

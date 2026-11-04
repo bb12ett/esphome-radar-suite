@@ -16,6 +16,18 @@ This suite provides real-time multi-target tracking, true architectural room bou
 
 ---
 
+> [!WARNING]
+> ### ⚠️ Breaking Change in v1.8.0: YAML Firmware Update Required
+> **v1.8.0 transitions software zones to native Home Assistant entity registry management (`disabled_by_default: true`).**
+> 
+> * **Zero Device Page Clutter**: All 10 zones are now disabled by default in firmware. Inactive zones are tucked away into Home Assistant's collapsed disabled entities section rather than cluttering your device page with `(Hidden) Unknown` items.
+> * **Independent Zone Support (`➕ Add Zone` / `🗑️ Disable Zone`)**: The sequential `Active Zones` number counter has been completely removed. You can now enable and disable any individual zone slot (e.g. Zone 1 and Zone 3) using the **`➕ Add Zone`** and **`🗑️ Disable`** buttons directly in the calibration card.
+> * **Required Action**: 
+>   1. Update your sensor configuration to the latest [`ld2450_full.yaml`](esphome/ld2450_full.yaml) and reflash your ESP32.
+>   2. After reflashing, the obsolete `number.<device>_active_zones` entity will appear as orphaned/unavailable in Home Assistant and can be safely deleted.
+
+---
+
 ## 🌟 Key Features
 
 ### 1. 🎯 Real-Time Radar Map Card (`custom:radar-map-card`)
@@ -31,7 +43,8 @@ This suite provides real-time multi-target tracking, true architectural room bou
 - **Multi-Mode Zones (Up to 10 Zones)**: Configure up to 10 independent zones. With a single click, set any zone to:
   - 🟢 **Detection Zone**: Tracks room occupants, counts, and maintains stationary presence.
   - 🔴 **Exclusion Mask**: Automatically ignores moving objects like ceiling fans, curtains, or robot vacuums so they don't trigger false occupancy.
-- **Configurable Active Zones & Clean Device Page**: Choose how many zones you want active (1–10). Inactive zones are automatically hidden in your Home Assistant device settings to keep things tidy, with zero reloads or disconnections.
+- **Dynamic Zones & Clean Device Page**: All 10 zones are disabled by default. Click **➕ Add Zone** to dynamically enable and configure slots, or click **🗑️ Disable** to reset coordinates and collapse them in Home Assistant.
+- **Responsive Layout**: Automatically stacks header controls and device selector on narrow/mobile viewports to prevent squashed dropdowns.
 - **Manual Coordinate Tuning**: Direct inputs for `X1`, `Y1`, `X2`, `Y2`, and `Angle (°)`, with quick nudge buttons ($\pm50\text{mm}$, $\pm5^\circ$) and live preview before saving.
 - **Mobile-Friendly**: Updates smoothly in the background without dropping focus or closing your mobile keyboard.
 
