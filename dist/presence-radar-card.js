@@ -1,13 +1,13 @@
 /**
  * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
- * Version 1.7.4 - Interactive Popups & History (More-Info Dialogs, Zone Click, Engine Tab Restart Layout)
+ * Version 1.7.5 - High-Precision mmWave Radar Suite (Unique Constructor Registration Fix)
  * 
  * Includes:
- * 1. <radar-map-card>         (Lovelace: custom:radar-map-card)
+ * 1. <radar-map-card>         (Lovelace: custom:radar-map-card / custom:presence-radar-card)
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.7.4";
+const CARD_VERSION = "1.7.5";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -3391,24 +3391,21 @@ class RadarCalibrationCard extends HTMLElement {
 // ====================================================================
 // ELEMENT REGISTRATION & COMPATIBILITY
 // ====================================================================
-if (!customElements.get("radar-map-card-editor")) {
-  customElements.define("radar-map-card-editor", RadarMapCardEditor);
-}
+const defineElement = (tag, cls) => {
+  if (!customElements.get(tag)) {
+    try {
+      customElements.define(tag, cls);
+    } catch (e) {
+      console.warn(`[PRESENCE-RADAR-CARDS] Could not register ${tag}:`, e);
+    }
+  }
+};
 
-if (!customElements.get("radar-map-card")) {
-  customElements.define("radar-map-card", RadarMapCard);
-}
+defineElement("radar-map-card-editor", RadarMapCardEditor);
+defineElement("radar-map-card", RadarMapCard);
+defineElement("presence-radar-card", class extends RadarMapCard {});
+defineElement("radar-calibration-card-editor", RadarCalibrationCardEditor);
+defineElement("radar-calibration-card", RadarCalibrationCard);
+defineElement("presence-calibration-card", class extends RadarCalibrationCard {});
 
-if (!customElements.get("radar-calibration-card-editor")) {
-  customElements.define("radar-calibration-card-editor", RadarCalibrationCardEditor);
-}
-
-if (!customElements.get("radar-calibration-card")) {
-  customElements.define("radar-calibration-card", RadarCalibrationCard);
-}
-
-if (!customElements.get("presence-calibration-card")) {
-  customElements.define("presence-calibration-card", RadarCalibrationCard);
-}
-
-console.log("[PRESENCE-RADAR-CARDS] v1.7.4 High-Precision mmWave Radar Suite initialized.");
+console.log("[PRESENCE-RADAR-CARDS] v1.7.5 High-Precision mmWave Radar Suite initialized.");
