@@ -45,6 +45,7 @@ This suite provides real-time multi-target tracking, true architectural room bou
   - 🔴 **Exclusion Mask**: Automatically ignores moving objects like ceiling fans, curtains, or robot vacuums so they don't trigger false occupancy.
 - **Dynamic Zones & Clean Device Page**: All 10 zones are disabled by default. Click **➕ Add Zone** to dynamically enable and configure slots, or click **🗑️ Disable** to reset coordinates and collapse them in Home Assistant.
 - **Responsive Layout**: Automatically stacks header controls and device selector on narrow/mobile viewports to prevent squashed dropdowns.
+- **In-Card Onboarding Wizard**: If no sensors are discovered, an interactive setup screen appears with a 1-click YAML generator. You can also select **➕ Add New Sensor...** from the device dropdown anytime.
 - **Manual Coordinate Tuning**: Direct inputs for `X1`, `Y1`, `X2`, `Y2`, and `Angle (°)`, with quick nudge buttons ($\pm50\text{mm}$, $\pm5^\circ$) and live preview before saving.
 - **Mobile-Friendly**: Updates smoothly in the background without dropping focus or closing your mobile keyboard.
 
@@ -111,24 +112,35 @@ device: ""                         # Calibrate any sensor in your home from this
 
 ## ⚡ ESPHome Configuration
 
-The repository provides two ready-to-use ESPHome setups located in the [`esphome/`](esphome/) folder:
+The repository provides ready-to-use ESPHome setups designed for zero-friction onboarding:
 
-### 1. Full Package (`ld2450_full.yaml`) — Recommended
-The complete, production-grade package featuring:
-- **Stationary Presence Memory**: Prevents lights turning off when sitting completely still (e.g. reading, watching TV).
-- **Up to 10 Multi-Mode Zones**: Set each zone as a Detection Zone or Exclusion Mask.
-- **Walk-In Auto-Calibration**: Works seamlessly with the calibration card buttons.
-- **Tunable Engine Settings**: Adjustable presence timeouts, off-delays, and exit margins.
+### 1. ⚡ 1-Minute Remote Package Setup (Recommended)
+No downloading files or copying directories needed! ESPHome fetches the entire suite directly from GitHub and automatically keeps it up-to-date whenever you compile.
 
-#### How to include the Full Package:
-1. Place [`presence_memory.h`](esphome/presence_memory.h) and [`ld2450_full.yaml`](esphome/ld2450_full.yaml) into your ESPHome directory (e.g. `config/esphome/`).
+Create a new device in your ESPHome Dashboard and paste this 10-line configuration:
+
+```yaml
+substitutions:
+  node_name: "living-room-presence"
+  friendly_name: "Living Room Presence"
+  tx_pin: "GPIO21"      # Connect to LD2450 RX
+  rx_pin: "GPIO20"      # Connect to LD2450 TX
+  board: "esp32-c3-devkitm-1"
+
+packages:
+  radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main
+```
+
+### 2. Manual Offline Package Setup
+For users who prefer to store all YAML files locally or run Home Assistant without internet access:
+1. Place [`presence_memory.h`](esphome/presence_memory.h) and [`ld2450_full.yaml`](esphome/ld2450_full.yaml) into your ESPHome directory (`config/esphome/`).
 2. Create your device YAML:
 ```yaml
 substitutions:
   node_name: "living-room-presence"
   friendly_name: "Living Room Presence"
-  tx_pin: "GPIO21"      # LD2450 RX
-  rx_pin: "GPIO20"      # LD2450 TX
+  tx_pin: "GPIO21"
+  rx_pin: "GPIO20"
   board: "esp32-c3-devkitm-1"
 
 packages:

@@ -1,5 +1,6 @@
 # ====================================================================
 # Example Node Configuration (e.g. living-room-presence.yaml)
+# 1-Minute Setup using Remote GitHub Package (Auto-updating)
 # ====================================================================
 
 substitutions:
@@ -10,4 +11,4 @@ substitutions:
   board: "esp32-c3-devkitm-1"
 
 packages:
-  radar_base: !include ld2450_full.yaml
+  radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main

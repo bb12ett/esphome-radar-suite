@@ -1,13 +1,13 @@
 /**
  * ESPHome LD2450 mmWave Radar Custom Cards for Home Assistant
- * Version 1.8.0 - Dynamic Per-Zone Enable/Disable Architecture & Responsive UI
+ * Version 1.8.1 - Dynamic Per-Zone Enable/Disable Architecture & Responsive UI
  * 
  * Includes:
  * 1. <radar-map-card>         (Lovelace: custom:radar-map-card / custom:presence-radar-card)
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.8.0";
+const CARD_VERSION = "1.8.1";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -773,6 +773,185 @@ class RadarMapCardEditor extends HTMLElement {
 }
 
 // ====================================================================
+// SETUP WIZARD: In-Card Quick Setup Guide & YAML Generator
+// ====================================================================
+class RadarSetupWizard {
+  static toKebab(str) {
+    return (str || "presence-sensor")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  static generateYaml(friendlyName, board, txPin, rxPin) {
+    const fName = (friendlyName || "Living Room Presence").trim();
+    const nodeName = this.toKebab(fName);
+    const b = (board || "esp32-c3-devkitm-1").trim();
+    const tx = (txPin || "GPIO21").trim();
+    const rx = (rxPin || "GPIO20").trim();
+
+    return `# ====================================================================
+# ESPHome Configuration for ${fName}
+# 1-Minute Setup using Remote GitHub Package (Auto-updating)
+# ====================================================================
+
+substitutions:
+  node_name: "${nodeName}"
+  friendly_name: "${fName}"
+  tx_pin: "${tx}"      # Connect to LD2450 RX
+  rx_pin: "${rx}"      # Connect to LD2450 TX
+  board: "${b}"
+
+packages:
+  radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main
+`;
+  }
+
+  static renderModalHtml(idPrefix = "wz") {
+    return `
+      <div id="${idPrefix}ModalOverlay" class="radar-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:16px; box-sizing:border-box;">
+        <div class="radar-modal-dialog" style="background:var(--card-bg, #0f172a); border:1px solid var(--border-color, rgba(255,255,255,0.15)); border-radius:16px; width:100%; max-width:540px; max-height:92vh; overflow-y:auto; padding:22px; box-shadow:0 20px 50px rgba(0,0,0,0.6); box-sizing:border-box; color:var(--text-color, #f8fafc); font-family:inherit; text-align:left;">
+          
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
+            <div>
+              <div style="font-size:1.15rem; font-weight:700; display:flex; align-items:center; gap:8px;">
+                <span>⚡</span> Add New Radar Sensor
+              </div>
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">
+                1-minute configuration using the remote GitHub package
+              </div>
+            </div>
+            <button id="${idPrefix}BtnClose" style="background:transparent; border:none; color:var(--text-muted); font-size:1.25rem; cursor:pointer; padding:2px 6px; border-radius:4px;" title="Close">✕</button>
+          </div>
+
+          <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:12px; margin-bottom:16px; font-size:0.82rem; line-height:1.45;">
+            <b>💡 How it works:</b> Paste this 10-line block into ESPHome. ESPHome automatically pulls the latest radar engine from GitHub and will keep it up-to-date whenever you re-flash.
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+            <div style="grid-column: 1 / -1;">
+              <label style="display:block; font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Room / Sensor Name</label>
+              <input type="text" id="${idPrefix}InpName" class="form-input" value="Living Room Presence" placeholder="e.g. Living Room Presence" style="width:100%; box-sizing:border-box;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Board Model</label>
+              <select id="${idPrefix}SelBoard" class="form-select" style="width:100%; box-sizing:border-box;">
+                <option value="esp32-c3-devkitm-1" selected>ESP32-C3 SuperMini (Recommended)</option>
+                <option value="esp32dev">Standard ESP32 (esp32dev)</option>
+                <option value="d1_mini32">D1 Mini ESP32 (d1_mini32)</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block; font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">LD2450 UART Pins (TX / RX)</label>
+              <div style="display:flex; gap:6px;">
+                <input type="text" id="${idPrefix}InpTx" class="form-input" value="GPIO21" title="ESP32 TX (to LD2450 RX)" style="width:50%; box-sizing:border-box;" />
+                <input type="text" id="${idPrefix}InpRx" class="form-input" value="GPIO20" title="ESP32 RX (to LD2450 TX)" style="width:50%; box-sizing:border-box;" />
+              </div>
+            </div>
+          </div>
+
+          <div style="position:relative; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <span style="font-size:0.75rem; font-weight:600; color:var(--text-muted);">Generated ESPHome YAML:</span>
+              <button id="${idPrefix}BtnCopy" class="btn-secondary" style="padding:4px 10px; font-size:0.75rem; display:inline-flex; align-items:center; gap:4px; cursor:pointer;">
+                📋 Copy YAML
+              </button>
+            </div>
+            <textarea id="${idPrefix}TxtYaml" readonly style="width:100%; height:160px; box-sizing:border-box; background:rgba(0,0,0,0.35); border:1px solid var(--border-color); border-radius:8px; color:#38bdf8; font-family:monospace; font-size:0.8rem; padding:10px; resize:none; outline:none; white-space:pre;"></textarea>
+          </div>
+
+          <div style="font-size:0.82rem; margin-bottom:16px;">
+            <div style="font-weight:700; margin-bottom:6px;">Quick 3-Step Setup:</div>
+            <ol style="margin:0; padding-left:18px; color:var(--text-muted); display:flex; flex-direction:column; gap:4px;">
+              <li>Open <b>ESPHome Dashboard</b> and click <b>New Device</b> &rarr; name it.</li>
+              <li>Click <b>Edit</b>, replace the default configuration with the YAML above, and click <b>Save</b>.</li>
+              <li>Click <b>Install</b> (via USB or Wirelessly). Once online, Home Assistant will adopt it and it will appear here automatically!</li>
+            </ol>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <a href="/esphome_dashboard" target="_blank" class="btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; padding:9px 16px; font-size:0.85rem;">
+              🚀 Open ESPHome Dashboard
+            </a>
+            <button id="${idPrefix}BtnDone" class="btn-secondary" style="padding:9px 16px; font-size:0.85rem; cursor:pointer;">
+              Close
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
+  static attachEvents(shadowRoot, idPrefix, onToast) {
+    const overlay = shadowRoot.getElementById(`${idPrefix}ModalOverlay`);
+    if (!overlay) return;
+
+    const inpName = shadowRoot.getElementById(`${idPrefix}InpName`);
+    const selBoard = shadowRoot.getElementById(`${idPrefix}SelBoard`);
+    const inpTx = shadowRoot.getElementById(`${idPrefix}InpTx`);
+    const inpRx = shadowRoot.getElementById(`${idPrefix}InpRx`);
+    const txtYaml = shadowRoot.getElementById(`${idPrefix}TxtYaml`);
+    const btnCopy = shadowRoot.getElementById(`${idPrefix}BtnCopy`);
+    const btnClose = shadowRoot.getElementById(`${idPrefix}BtnClose`);
+    const btnDone = shadowRoot.getElementById(`${idPrefix}BtnDone`);
+
+    const updateYaml = () => {
+      if (txtYaml) {
+        txtYaml.value = this.generateYaml(
+          inpName ? inpName.value : "Living Room Presence",
+          selBoard ? selBoard.value : "esp32-c3-devkitm-1",
+          inpTx ? inpTx.value : "GPIO21",
+          inpRx ? inpRx.value : "GPIO20"
+        );
+      }
+    };
+
+    updateYaml();
+
+    if (inpName) inpName.addEventListener("input", updateYaml);
+    if (selBoard) selBoard.addEventListener("change", updateYaml);
+    if (inpTx) inpTx.addEventListener("input", updateYaml);
+    if (inpRx) inpRx.addEventListener("input", updateYaml);
+
+    if (btnCopy) {
+      btnCopy.addEventListener("click", () => {
+        if (txtYaml) {
+          navigator.clipboard.writeText(txtYaml.value).then(() => {
+            if (onToast) onToast("YAML copied to clipboard!");
+            btnCopy.textContent = "✅ Copied!";
+            setTimeout(() => { btnCopy.textContent = "📋 Copy YAML"; }, 2000);
+          }).catch(() => {
+            txtYaml.select();
+            document.execCommand("copy");
+            if (onToast) onToast("YAML copied to clipboard!");
+          });
+        }
+      });
+    }
+
+    const hide = () => {
+      overlay.style.display = "none";
+    };
+
+    if (btnClose) btnClose.addEventListener("click", hide);
+    if (btnDone) btnDone.addEventListener("click", hide);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) hide();
+    });
+  }
+
+  static open(shadowRoot, idPrefix) {
+    const overlay = shadowRoot.getElementById(`${idPrefix}ModalOverlay`);
+    if (overlay) {
+      overlay.style.display = "flex";
+      const inp = shadowRoot.getElementById(`${idPrefix}InpName`);
+      if (inp) setTimeout(() => inp.focus(), 50);
+    }
+  }
+}
+
+// ====================================================================
 // CARD 1: RADAR MAP CARD (<radar-map-card>)
 // ====================================================================
 class RadarMapCard extends HTMLElement {
@@ -860,6 +1039,65 @@ class RadarMapCard extends HTMLElement {
 
   _render() {
     const devices = RadarEntityResolver.getDevices(this._hass);
+
+    if (devices.length === 0) {
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host {
+            display: block;
+            font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+            --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
+            --primary-color: #38bdf8;
+            --text-color: var(--primary-text-color, #f8fafc);
+            --text-muted: var(--secondary-text-color, #94a3b8);
+            --border-color: rgba(255, 255, 255, 0.1);
+          }
+          ha-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            padding: 34px 18px;
+            color: var(--text-color);
+            text-align: center;
+          }
+          .btn-primary {
+            background: var(--primary-color);
+            color: #0f172a;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 8px;
+          }
+        </style>
+        <ha-card>
+          <div style="font-size: 2.8rem; margin-bottom: 12px;">🎯</div>
+          <div style="font-size: 1.2rem; font-weight: 700; margin-bottom: 6px;">No Presence Sensors Found</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 400px; margin: 0 auto 20px; line-height: 1.5;">
+            No mmWave radar presence sensors detected. Add a sensor using ESPHome to see live room tracking and detection zones here.
+          </div>
+          <button class="btn-primary" id="btnMapEmptySetup">
+            ⚡ Quick Setup Guide & YAML Generator
+          </button>
+          ${RadarSetupWizard.renderModalHtml("mapWz")}
+        </ha-card>
+      `;
+      RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz");
+      const btn = this.shadowRoot.getElementById("btnMapEmptySetup");
+      if (btn) btn.addEventListener("click", () => RadarSetupWizard.open(this.shadowRoot, "mapWz"));
+      return;
+    }
+
     const hasPinnedDevice = Boolean(this._config && this._config.device);
     const isMinimal = this._config && this._config.layout_mode === "minimal";
 
@@ -1141,6 +1379,7 @@ class RadarMapCard extends HTMLElement {
             <div class="device-selector-wrapper" style="${hasPinnedDevice ? "display: none;" : ""}">
               <select id="mapDeviceSelect" class="device-select">
                 ${devices.map(d => `<option value="${d.prefix}" ${this._selectedDevice === d.prefix ? "selected" : ""}>${d.name}</option>`).join("")}
+                <option value="__new__" style="color:var(--primary-color); font-weight:700;">➕ Add New Sensor...</option>
               </select>
             </div>
           </div>
@@ -1211,12 +1450,20 @@ class RadarMapCard extends HTMLElement {
           <div class="zone-pill" id="pillZ3">Zone 3</div>
           <div class="zone-pill" id="pillZ4">Zone 4</div>
         </div>
+        ${RadarSetupWizard.renderModalHtml("mapWz")}
       </ha-card>
     `;
+
+    RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz");
 
     const selectEl = this.shadowRoot.getElementById("mapDeviceSelect");
     if (selectEl) {
       selectEl.addEventListener("change", (e) => {
+        if (e.target.value === "__new__") {
+          e.target.value = this._selectedDevice;
+          RadarSetupWizard.open(this.shadowRoot, "mapWz");
+          return;
+        }
         this._selectedDevice = e.target.value;
         this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
         window.dispatchEvent(new CustomEvent("radar-device-selected", {
@@ -1874,6 +2121,65 @@ class RadarCalibrationCard extends HTMLElement {
 
   _renderFull() {
     const devices = RadarEntityResolver.getDevices(this._hass);
+
+    if (devices.length === 0) {
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host {
+            display: block;
+            font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+            --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
+            --primary-color: #38bdf8;
+            --text-color: var(--primary-text-color, #f8fafc);
+            --text-muted: var(--secondary-text-color, #94a3b8);
+            --border-color: rgba(255, 255, 255, 0.1);
+          }
+          ha-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            padding: 36px 20px;
+            color: var(--text-color);
+            text-align: center;
+          }
+          .btn-primary {
+            background: var(--primary-color);
+            color: #0f172a;
+            border: none;
+            padding: 10px 22px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 8px;
+          }
+        </style>
+        <ha-card>
+          <div style="font-size: 3rem; margin-bottom: 12px;">📡</div>
+          <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px;">No Presence Sensors Found</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 420px; margin: 0 auto 20px; line-height: 1.5;">
+            No HLK-LD2450 radar sensors were detected in Home Assistant yet. Use our 1-minute setup wizard to configure and add your first sensor.
+          </div>
+          <button class="btn-primary" id="btnEmptySetupGuide">
+            ⚡ Quick Setup Guide & YAML Generator
+          </button>
+          ${RadarSetupWizard.renderModalHtml("calWz")}
+        </ha-card>
+      `;
+      RadarSetupWizard.attachEvents(this.shadowRoot, "calWz");
+      const btn = this.shadowRoot.getElementById("btnEmptySetupGuide");
+      if (btn) btn.addEventListener("click", () => RadarSetupWizard.open(this.shadowRoot, "calWz"));
+      return;
+    }
+
     const hasPinnedDevice = Boolean(this._config && this._config.device);
 
     this.shadowRoot.innerHTML = `
@@ -2370,6 +2676,7 @@ class RadarCalibrationCard extends HTMLElement {
             <div class="device-selector-wrapper" style="${hasPinnedDevice ? "display: none;" : ""}">
               <select id="activeDeviceSelect" class="device-select">
                 ${devices.map(d => `<option value="${d.prefix}" ${this._selectedDevice === d.prefix ? "selected" : ""}>${d.name}</option>`).join("")}
+                <option value="__new__" style="color:var(--primary-color); font-weight:700;">➕ Add New Sensor...</option>
               </select>
             </div>
           </div>
@@ -2568,8 +2875,11 @@ class RadarCalibrationCard extends HTMLElement {
             <button class="btn-danger" id="btnFactoryResetRadar" title="Factory Reset LD2450">⚠️ Factory Reset Radar</button>
           </div>
         </div>
+        ${RadarSetupWizard.renderModalHtml("calWz")}
       </ha-card>
     `;
+
+    RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", (msg) => this._showToast(msg));
 
     this._bindEvents();
     this._initFormStateFromEntities();
@@ -2581,6 +2891,11 @@ class RadarCalibrationCard extends HTMLElement {
     const selDevice = this.shadowRoot.getElementById("activeDeviceSelect");
     if (selDevice) {
       selDevice.addEventListener("change", (e) => {
+        if (e.target.value === "__new__") {
+          e.target.value = this._selectedDevice;
+          RadarSetupWizard.open(this.shadowRoot, "calWz");
+          return;
+        }
         this._selectedDevice = e.target.value;
         this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
         window.dispatchEvent(new CustomEvent("radar-device-selected", {
