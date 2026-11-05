@@ -74,17 +74,13 @@ title: Radar Calibration & Setup
 
 ### Step 3: Quick Config Guide (Generate YAML & Flash)
 
-If no radar sensors are detected yet, the cards will automatically display the unified onboarding screen:
-
-<p align="center">
-  <img src="images/preview.png" alt="Setup Wizard Screen" width="600" />
-</p>
+If no radar sensors are detected yet, both cards automatically display an empty onboarding card with a **`⚡ Quick Setup Guide & YAML Generator`** button:
 
 1. Click **`⚡ Quick Setup Guide & YAML Generator`** on either card (or select **`➕ Add New Sensor...`** from the device dropdown at any time).
-2. Fill out the 3 fields in the wizard:
+2. Fill out the 3 fields in the wizard dialog:
    * **Sensor Friendly Name**: e.g., `Living Room Presence` (the wizard automatically creates `node_name: living-room-presence`).
-   * **Board Model**: Select your ESP32 board (e.g. `ESP32-C3 SuperMini`, `esp32dev`, `d1_mini32`).
-   * **UART Pins**: Specify your TX and RX GPIO pins connected to the LD2450.
+   * **Board Model**: Select your ESP32 board (`ESP32-C3 SuperMini`, `Standard ESP32 (esp32dev)`, or `D1 Mini ESP32`).
+   * **UART Pins**: Specify your TX and RX GPIO pins connected to the LD2450 (e.g., `GPIO21` TX and `GPIO20` RX).
 3. Click **`📋 Copy YAML`**. The wizard automatically generates the complete 10-line auto-updating package configuration:
    ```yaml
    substitutions:
@@ -108,36 +104,45 @@ If no radar sensors are detected yet, the cards will automatically display the u
 
 ### Step 4: Calibrate Room Geometry & Detection Zones
 
-Open the **`custom:radar-calibration-card`** for your sensor. Calibration is divided into 4 intuitive tabs:
+Open the **`custom:radar-calibration-card`** for your sensor. Calibration is organized into **3 intuitive tabs**:
 
-#### 1. Tab 1: Room Geometry & Placement
-* **Room Width & Depth**: Enter your physical room measurements in millimeters (e.g., $4000\text{mm} \times 5000\text{mm}$).
+#### 1. Tab 1: 📐 Placement & Room
+* **Room Dimensions**: Enter your physical room measurements in millimeters:
+  * **Room Width (mm)** (e.g. `4000`)
+  * **Room Depth (mm)** (e.g. `5000`)
 * **Sensor Placement Preset**:
-  * **Center Wall ($0^\circ$)**: Mounted in the middle of the wall facing forward into the room.
-  * **Front-Left Corner ($-45^\circ$)**: Mounted in the front-left corner angled inward diagonally.
-  * **Front-Right Corner ($+45^\circ$)**: Mounted in the front-right corner angled inward diagonally.
+  * **Center Wall ($0^\circ$)**: Mounted centered along a wall facing forward into the room.
+  * **Front-Left Corner ($-45^\circ$ Inward)**: Mounted in the front-left corner angled inward diagonally.
+  * **Front-Right Corner ($+45^\circ$ Inward)**: Mounted in the front-right corner angled inward diagonally.
+  * **Left Corner Flat ($0^\circ$)**: Mounted in left corner facing straight ahead.
+  * **Right Corner Flat ($0^\circ$)**: Mounted in right corner facing straight ahead.
   * **Custom Offset & Yaw**: Adjust wall offset and mounting yaw freely for irregular rooms.
-* Click **Save Placement**. The live radar viewfinder will instantly transform to match your physical room layout!
+* **Enclosure Orientation**: Toggle **Upside-Down Mount (Flip X-Axis)** if your enclosure or PCB is mounted inverted.
+* Click **`⚡ Save & Flash Room Boundaries to ESP32`**. The live radar viewfinder will instantly transform to match your physical room layout!
 
-#### 2. Tab 2: Walk-in Zone Calibration
-Define detection and exclusion zones without typing coordinates:
+#### 2. Tab 2: 🎯 Multi-Mode Zones
+Define detection and exclusion zones without typing coordinates using the walk-in stepper:
 1. Click **`➕ Add Zone`** (supports up to 10 independent dynamic zones).
-2. Walk to the **first corner** of your furniture or area (e.g., front-left of sofa or bed) and watch your target dot in the viewfinder.
+2. Walk to the **first corner** of your furniture or area (e.g., front-left of sofa or bed) and watch your target dot in the live viewfinder.
 3. Click **`📍 Capture Corner 1`**.
 4. Walk to the **opposite diagonal corner** (e.g., back-right of sofa or bed).
 5. Click **`💾 Capture Corner 2 & Save`**.
 6. Select your **Zone Type**:
    * 🟢 **Detection Zone**: Triggers room occupancy, counts occupants, and maintains stationary presence.
-   * 🔴 **Exclusion Mask**: Software filter that completely ignores moving inanimate objects (ceiling fans, curtains, robot vacuums) within that box so they never falsely trigger room presence.
-7. *(Optional)* Fine-tune edges with the quick nudge buttons ($\pm50\text{mm}$, $\pm5^\circ$).
+   * 🔴 **Exclusion Mask**: Software filter that completely ignores moving inanimate objects (ceiling fans, fluttering curtains, robot vacuums) within that box so they never falsely trigger room occupancy.
+7. *(Optional)* Fine-tune coordinates with quick nudge buttons ($\pm50\text{mm}$, $\pm5^\circ$) or direct inputs (`X1`, `Y1`, `X2`, `Y2`, `Angle`).
+8. To remove or collapse unused zones in Home Assistant, click **`🗑️ Disable`**.
 
-#### 3. Tab 3: Hardware Exclusion (LD2450 Filter Gates)
-* Configure onboard LD2450 hardware filter/detection gates to eliminate reflections or walls directly on the radar module.
-
-#### 4. Tab 4: Radar Engine & Stationary Memory Tuning
-* **Presence Timeout & Zone Off Delay**: Adjust how long presence stays latched after movement stops.
-* **Stationary Presence Memory**: Latch stationary targets in detection zones even when LD2450 energy drops.
-* **Multi-Target Tracking**: Enable/disable 3-target resolution tracking.
+#### 3. Tab 3: ⚙️ Engine & Sensitivity
+Fine-tune radar filtering, latching, and timeouts:
+* **Maximum Detection Distance (mm)**: Ignores reflections, doorways, or false targets beyond this distance.
+* **Presence Timeout (s)**: Seconds to maintain room presence after all motion disappears.
+* **Zone Off Delay (s)**: Seconds to wait before clearing zone occupancy.
+* **Stationary Presence Memory (Vanish Protection)**: Checkbox toggle to latch stationary occupants in detection zones even when LD2450 signal energy drops while sitting completely still.
+* **Stationary Latch Timeout (min)**: Minutes to preserve latch when stationary target sits or sleeps (default 30m).
+* **Exit Trajectory Margin (mm)**: Distance from boundary to immediately release stationary latch when an occupant walks out of the zone.
+* **Multi-Target Tracking**: Enable/disable simultaneous tracking for up to 3 people.
+* **Hardware Maintenance**: Quick buttons to **`🔄 Restart ESP32`**, **`🔄 Restart Radar Module`**, or **`⚠️ Factory Reset Radar`**.
 
 ---
 
@@ -154,10 +159,10 @@ Switch back to **`custom:radar-map-card`**:
 - **True Room Dimensions**: Enter your room's width and depth to see realistic physical boundaries.
 - **Flexible Sensor Placement**: Mount your sensor centered, offset along a wall, or rotated in a corner (e.g. $45^\circ$) — targets and zones automatically align with your room.
 - **Dual Display Modes**: Choose between `full` (radar map, live target telemetry, and zone status badges) or `minimal` (clean map only for overview dashboards).
-- **Auto-Discovery**: Automatically finds and connects to any LD2450 sensor in your Home Assistant setup.
+- **Auto-Discovery & Device Dropdown**: Automatically finds and connects to any LD2450 sensor in your Home Assistant setup.
 
 ### 2. 🛠️ Presence Calibration Suite (`custom:radar-calibration-card`)
-- **Live Viewfinder**: Real-time room map stays pinned at the top across all tabs for instant visual feedback.
+- **Live Viewfinder**: Real-time room map stays pinned at the top across all 3 tabs for instant visual feedback.
 - **Walk-in Calibration**: Walk to Corner 1 $\rightarrow$ Click **Capture Corner 1** $\rightarrow$ Walk to Corner 2 $\rightarrow$ Click **Capture Corner 2 & Save**. The card automatically calculates and saves the zone to your sensor.
 - **Multi-Mode Zones (Up to 10 Zones)**: Configure up to 10 independent zones. With a single click, set any zone to:
   - 🟢 **Detection Zone**: Tracks room occupants, counts, and maintains stationary presence.
