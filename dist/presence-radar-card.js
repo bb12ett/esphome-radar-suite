@@ -830,6 +830,539 @@ if (typeof window !== "undefined") {
 
 
 // ====================================================================
+// FLOORPLAN MANAGER: Per-Sensor Image Overlay, Scaling & Live Setup
+// ====================================================================
+class RadarFloorplanManager {
+  static getFloorplan(config, device) {
+    if (!device) return null;
+    // 1. Check card config dictionary
+    if (config && config.floorplans && config.floorplans[device]) {
+      return config.floorplans[device];
+    }
+    // 2. Check localStorage for browser-level persistence
+    try {
+      const local = localStorage.getItem(`presence_radar_fp_${device}`);
+      if (local) {
+        return JSON.parse(local);
+      }
+    } catch (_) {}
+    // 3. Fallback to root level config
+    if (config && (config.floorplan_image || (config.floorplan && config.floorplan.image))) {
+      return {
+        image: config.floorplan_image || config.floorplan.image,
+        opacity: config.floorplan_opacity !== undefined ? config.floorplan_opacity : (config.floorplan?.opacity || 0.45),
+        fit: config.floorplan_fit || config.floorplan?.fit || "room",
+        width: config.floorplan_width || config.floorplan?.width || 0,
+        depth: config.floorplan_depth || config.floorplan?.depth || 0,
+        offsetX: config.floorplan_offset_x || config.floorplan?.offsetX || 0,
+        offsetY: config.floorplan_offset_y || config.floorplan?.offsetY || 0
+      };
+    }
+    return null;
+  }
+
+  static saveFloorplan(device, fpData, cardOrEditorInstance) {
+    if (!device) return;
+    try {
+      if (fpData && fpData.image) {
+        localStorage.setItem(`presence_radar_fp_${device}`, JSON.stringify(fpData));
+      } else {
+        localStorage.removeItem(`presence_radar_fp_${device}`);
+      }
+    } catch (_) {}
+
+    if (cardOrEditorInstance && cardOrEditorInstance._config) {
+      const newConfig = Object.assign({}, cardOrEditorInstance._config);
+      newConfig.floorplans = Object.assign({}, newConfig.floorplans);
+      if (fpData && fpData.image) {
+        newConfig.floorplans[device] = Object.assign({}, fpData);
+      } else {
+        delete newConfig.floorplans[device];
+      }
+      cardOrEditorInstance._config = newConfig;
+      cardOrEditorInstance.dispatchEvent(new CustomEvent("config-changed", {
+        detail: { config: newConfig },
+        bubbles: true,
+        composed: true
+      }));
+    }
+  }
+
+  static renderFloorplanSvg(fp, geom, clipId) {
+    if (!fp || !fp.image) return "";
+    const opacity = (fp.opacity !== undefined && fp.opacity !== null) ? parseFloat(fp.opacity) : 0.45;
+    let x = 0, y = 0, w = geom.roomWidth, d = geom.roomDepth;
+    if (fp.fit === "custom") {
+      x = parseFloat(fp.offsetX) || 0;
+      y = parseFloat(fp.offsetY) || 0;
+      w = parseFloat(fp.width) || geom.roomWidth;
+      d = parseFloat(fp.depth) || geom.roomDepth;
+    }
+    const clipAttr = clipId ? `clip-path="url(#${clipId})"` : "";
+    return `
+      <g id="floorplanContainer" ${clipAttr} pointer-events="none">
+        <image href="${fp.image}" x="${x}" y="${y}" width="${w}" height="${d}"
+               opacity="${opacity}" preserveAspectRatio="none" />
+      </g>
+    `;
+  }
+
+  static renderModalHtml(idPrefix = "fp") {
+    return `
+      <div id="${idPrefix}ModalOverlay" class="radar-modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.78); z-index:99999; justify-content:center; align-items:center; backdrop-filter:blur(5px); padding:16px; box-sizing:border-box;">
+        <div style="background:#0f172a; border:1px solid rgba(255,255,255,0.15); border-radius:14px; width:100%; max-width:480px; max-height:92vh; overflow-y:auto; padding:22px; box-shadow:0 20px 50px rgba(0,0,0,0.7); box-sizing:border-box; color:var(--text-color, #f8fafc); font-family:inherit; text-align:left; color-scheme:dark;">
+          
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
+            <div>
+              <div style="font-size:1.15rem; font-weight:700; display:flex; align-items:center; gap:8px;">
+                <span>🖼️</span> Floorplan Overlay Settings
+              </div>
+              <div id="${idPrefix}ModalDeviceName" style="font-size:0.82rem; color:var(--primary-color, #38bdf8); font-weight:600; margin-top:3px;">
+                Sensor: ...
+              </div>
+            </div>
+            <button id="${idPrefix}BtnClose" style="background:transparent; border:none; color:var(--text-muted); font-size:1.25rem; cursor:pointer; padding:2px 6px; border-radius:4px;" title="Close">✕</button>
+          </div>
+
+          <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:12px; margin-bottom:16px; font-size:0.82rem; line-height:1.45;">
+            <b>💡 How it works:</b> Put your floorplan image in Home Assistant's <code>/config/www/</code> directory and reference it as <code>/local/your_image.png</code>. It will automatically scale to match your radar detection space!
+          </div>
+
+          <div style="margin-bottom:14px;">
+            <label style="display:block; font-size:0.82rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Floorplan Image URL / Path</label>
+            <input type="text" id="${idPrefix}InpImage" placeholder="e.g. /local/floorplans/living_room.png"
+                   style="width:100%; padding:9px 12px; border-radius:8px; background:rgba(255,255,255,0.06); color:#f8fafc; border:1px solid rgba(255,255,255,0.15); font-size:0.85rem; box-sizing:border-box; outline:none;" />
+          </div>
+
+          <div style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label style="font-size:0.82rem; font-weight:600; color:var(--text-muted);">Overlay Opacity</label>
+              <span id="${idPrefix}OpacityLabel" style="font-size:0.82rem; font-weight:700; color:var(--primary-color, #38bdf8);">45%</span>
+            </div>
+            <input type="range" id="${idPrefix}InpOpacity" min="10" max="100" value="45"
+                   style="width:100%; cursor:pointer; accent-color:var(--primary-color, #38bdf8);" />
+          </div>
+
+          <div style="margin-bottom:16px;">
+            <label style="display:block; font-size:0.82rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Fit Mode</label>
+            <select id="${idPrefix}SelFit"
+                    style="width:100%; padding:9px 12px; border-radius:8px; background:#1e293b; color:#f8fafc; border:1px solid rgba(255,255,255,0.15); font-size:0.85rem; box-sizing:border-box; outline:none; cursor:pointer;">
+              <option value="room">Fit to Room Boundaries (Automatic Width & Depth)</option>
+              <option value="custom">Custom Dimensions & Offset (Advanced)</option>
+            </select>
+          </div>
+
+          <div id="${idPrefix}CustomBox" style="display:none; padding:12px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); margin-bottom:16px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">Width (mm)</label>
+                <input type="number" id="${idPrefix}InpWidth" placeholder="4000" style="width:100%; padding:6px 8px; border-radius:6px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+              </div>
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">Depth (mm)</label>
+                <input type="number" id="${idPrefix}InpDepth" placeholder="5000" style="width:100%; padding:6px 8px; border-radius:6px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+              </div>
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">Offset X (mm)</label>
+                <input type="number" id="${idPrefix}InpOffsetX" placeholder="0" style="width:100%; padding:6px 8px; border-radius:6px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+              </div>
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">Offset Y (mm)</label>
+                <input type="number" id="${idPrefix}InpOffsetY" placeholder="0" style="width:100%; padding:6px 8px; border-radius:6px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <button id="${idPrefix}BtnRemove" class="btn-danger" style="padding:9px 16px; font-size:0.85rem;">
+              🗑️ Remove
+            </button>
+            <div style="display:flex; gap:8px;">
+              <button id="${idPrefix}BtnCancel" class="btn-secondary" style="padding:9px 16px; font-size:0.85rem;">
+                Cancel
+              </button>
+              <button id="${idPrefix}BtnSave" class="btn-primary" style="padding:9px 18px; font-size:0.85rem;">
+                💾 Save Floorplan
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  static attachEvents(shadowRoot, idPrefix, cardInstance) {
+    if (!shadowRoot) return;
+    const overlay = shadowRoot.getElementById(`${idPrefix}ModalOverlay`);
+    const btnClose = shadowRoot.getElementById(`${idPrefix}BtnClose`);
+    const btnCancel = shadowRoot.getElementById(`${idPrefix}BtnCancel`);
+    const btnSave = shadowRoot.getElementById(`${idPrefix}BtnSave`);
+    const btnRemove = shadowRoot.getElementById(`${idPrefix}BtnRemove`);
+    const inpOpacity = shadowRoot.getElementById(`${idPrefix}InpOpacity`);
+    const lblOpacity = shadowRoot.getElementById(`${idPrefix}OpacityLabel`);
+    const selFit = shadowRoot.getElementById(`${idPrefix}SelFit`);
+    const customBox = shadowRoot.getElementById(`${idPrefix}CustomBox`);
+
+    const close = () => {
+      if (overlay) overlay.style.display = "none";
+    };
+
+    if (btnClose) btnClose.addEventListener("click", close);
+    if (btnCancel) btnCancel.addEventListener("click", close);
+    if (overlay) {
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) close();
+      });
+    }
+
+    if (inpOpacity && lblOpacity) {
+      inpOpacity.addEventListener("input", () => {
+        lblOpacity.textContent = `${inpOpacity.value}%`;
+      });
+    }
+
+    if (selFit && customBox) {
+      selFit.addEventListener("change", () => {
+        customBox.style.display = selFit.value === "custom" ? "block" : "none";
+      });
+    }
+
+    if (btnSave) {
+      btnSave.addEventListener("click", () => {
+        const dev = cardInstance._selectedDevice;
+        const inpImg = shadowRoot.getElementById(`${idPrefix}InpImage`);
+        const imgVal = (inpImg && inpImg.value) ? inpImg.value.trim() : "";
+        const opVal = (inpOpacity ? parseInt(inpOpacity.value, 10) : 45) / 100.0;
+        const fitVal = selFit ? selFit.value : "room";
+
+        let fpData = null;
+        if (imgVal) {
+          fpData = {
+            image: imgVal,
+            opacity: opVal,
+            fit: fitVal
+          };
+          if (fitVal === "custom") {
+            const inW = shadowRoot.getElementById(`${idPrefix}InpWidth`);
+            const inD = shadowRoot.getElementById(`${idPrefix}InpDepth`);
+            const inX = shadowRoot.getElementById(`${idPrefix}InpOffsetX`);
+            const inY = shadowRoot.getElementById(`${idPrefix}InpOffsetY`);
+            fpData.width = inW ? parseFloat(inW.value) || 0 : 0;
+            fpData.depth = inD ? parseFloat(inD.value) || 0 : 0;
+            fpData.offsetX = inX ? parseFloat(inX.value) || 0 : 0;
+            fpData.offsetY = inY ? parseFloat(inY.value) || 0 : 0;
+          }
+        }
+
+        RadarFloorplanManager.saveFloorplan(dev, fpData, cardInstance);
+        close();
+        if (cardInstance._showToast) {
+          cardInstance._showToast(fpData ? `🖼️ Floorplan saved for ${dev}!` : `Floorplan removed for ${dev}.`);
+        }
+        if (cardInstance._updateViewfinder) cardInstance._updateViewfinder();
+        if (cardInstance._update) cardInstance._update();
+      });
+    }
+
+    if (btnRemove) {
+      btnRemove.addEventListener("click", () => {
+        const dev = cardInstance._selectedDevice;
+        RadarFloorplanManager.saveFloorplan(dev, null, cardInstance);
+        close();
+        if (cardInstance._showToast) {
+          cardInstance._showToast(`Floorplan removed for ${dev}.`);
+        }
+        if (cardInstance._updateViewfinder) cardInstance._updateViewfinder();
+        if (cardInstance._update) cardInstance._update();
+      });
+    }
+  }
+
+  static open(shadowRoot, idPrefix, device, cardInstance) {
+    if (!shadowRoot || !device) return;
+    const overlay = shadowRoot.getElementById(`${idPrefix}ModalOverlay`);
+    if (!overlay) return;
+
+    const devLabel = shadowRoot.getElementById(`${idPrefix}ModalDeviceName`);
+    const devs = cardInstance._hass ? RadarEntityResolver.getDevices(cardInstance._hass) : [];
+    const matched = devs.find(d => d.prefix === device);
+    const friendlyName = matched ? matched.name : device.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+
+    if (devLabel) {
+      devLabel.textContent = `Sensor: ${friendlyName} (${device})`;
+    }
+
+    const fp = RadarFloorplanManager.getFloorplan(cardInstance._config, device);
+
+    const inpImg = shadowRoot.getElementById(`${idPrefix}InpImage`);
+    const inpOpacity = shadowRoot.getElementById(`${idPrefix}InpOpacity`);
+    const lblOpacity = shadowRoot.getElementById(`${idPrefix}OpacityLabel`);
+    const selFit = shadowRoot.getElementById(`${idPrefix}SelFit`);
+    const customBox = shadowRoot.getElementById(`${idPrefix}CustomBox`);
+    const inW = shadowRoot.getElementById(`${idPrefix}InpWidth`);
+    const inD = shadowRoot.getElementById(`${idPrefix}InpDepth`);
+    const inX = shadowRoot.getElementById(`${idPrefix}InpOffsetX`);
+    const inY = shadowRoot.getElementById(`${idPrefix}InpOffsetY`);
+
+    if (inpImg) inpImg.value = (fp && fp.image) || "";
+    const opPercent = fp && fp.opacity !== undefined ? Math.round(fp.opacity * 100) : 45;
+    if (inpOpacity) inpOpacity.value = opPercent;
+    if (lblOpacity) lblOpacity.textContent = `${opPercent}%`;
+
+    const isCustom = Boolean(fp && fp.fit === "custom");
+    if (selFit) selFit.value = isCustom ? "custom" : "room";
+    if (customBox) customBox.style.display = isCustom ? "block" : "none";
+
+    if (inW) inW.value = (fp && fp.width) || "";
+    if (inD) inD.value = (fp && fp.depth) || "";
+    if (inX) inX.value = (fp && fp.offsetX) || "";
+    if (inY) inY.value = (fp && fp.offsetY) || "";
+
+    overlay.style.display = "flex";
+  }
+
+  // ==================================================================
+  // GUI CARD EDITOR INTEGRATION (Both Cards)
+  // ==================================================================
+  static renderEditorSection(idPrefix = "fpEdit") {
+    return `
+      <div style="border-top:1px solid rgba(255,255,255,0.12); padding-top:14px; margin-top:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <label style="font-size:0.9rem; font-weight:700; display:flex; align-items:center; gap:6px;">
+            <span>🖼️</span> Floorplan Overlay (Per-Sensor)
+          </label>
+          <span id="${idPrefix}ActiveBadge" style="display:none; font-size:0.72rem; padding:2px 8px; border-radius:10px; background:rgba(56,189,248,0.15); color:#38bdf8; font-weight:600;">
+            Configured
+          </span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--secondary-text-color, #94a3b8); margin-bottom:12px; line-height:1.4;">
+          Display an architectural floorplan or room map under the radar beam. Configured per sensor so switching sensors in the dropdown dynamically switches the floorplan.
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Configure Floorplan For Sensor</label>
+          <select id="${idPrefix}DeviceSelect" style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2);">
+            <option value="">Select a sensor...</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Floorplan Image Path or URL</label>
+          <input type="text" id="${idPrefix}ImageInput" placeholder="e.g. /local/floorplans/living_room.png"
+                 style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); box-sizing:border-box;" />
+          <div style="font-size:0.72rem; color:var(--secondary-text-color, #94a3b8); margin-top:3px;">
+            Put image files in <code>/config/www/</code> and enter <code>/local/your_image.png</code>.
+          </div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label style="font-size:0.82rem; font-weight:600;">Overlay Opacity</label>
+            <span id="${idPrefix}OpacityLabel" style="font-size:0.82rem; font-weight:700; color:var(--primary-color, #38bdf8);">45%</span>
+          </div>
+          <input type="range" id="${idPrefix}OpacityRange" min="10" max="100" value="45"
+                 style="width:100%; cursor:pointer; accent-color:var(--primary-color, #38bdf8);" />
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Scale & Fit Mode</label>
+          <select id="${idPrefix}FitSelect" style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2);">
+            <option value="room">Fit to Room Boundaries (Automatic Width & Depth)</option>
+            <option value="custom">Custom Dimensions & Offset (Advanced)</option>
+          </select>
+        </div>
+
+        <div id="${idPrefix}CustomBox" style="display:none; padding:10px; border-radius:6px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div>
+              <label style="display:block; font-size:0.75rem; margin-bottom:2px;">Width (mm)</label>
+              <input type="number" id="${idPrefix}Width" placeholder="4000" style="width:100%; padding:6px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:0.75rem; margin-bottom:2px;">Depth (mm)</label>
+              <input type="number" id="${idPrefix}Depth" placeholder="5000" style="width:100%; padding:6px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:0.75rem; margin-bottom:2px;">Offset X (mm)</label>
+              <input type="number" id="${idPrefix}OffsetX" placeholder="0" style="width:100%; padding:6px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+            </div>
+            <div>
+              <label style="display:block; font-size:0.75rem; margin-bottom:2px;">Offset Y (mm)</label>
+              <input type="number" id="${idPrefix}OffsetY" placeholder="0" style="width:100%; padding:6px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.15); box-sizing:border-box;" />
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end;">
+          <button type="button" id="${idPrefix}BtnClear" style="padding:6px 12px; font-size:0.78rem; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3); border-radius:6px; cursor:pointer;">
+            🗑️ Clear Floorplan for Selected Sensor
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  static attachEditorEvents(container, idPrefix = "fpEdit", editorInstance) {
+    if (!container) return;
+    const selDev = container.querySelector(`#${idPrefix}DeviceSelect`);
+    const inpImg = container.querySelector(`#${idPrefix}ImageInput`);
+    const rngOpacity = container.querySelector(`#${idPrefix}OpacityRange`);
+    const lblOpacity = container.querySelector(`#${idPrefix}OpacityLabel`);
+    const selFit = container.querySelector(`#${idPrefix}FitSelect`);
+    const customBox = container.querySelector(`#${idPrefix}CustomBox`);
+    const inpW = container.querySelector(`#${idPrefix}Width`);
+    const inpD = container.querySelector(`#${idPrefix}Depth`);
+    const inpX = container.querySelector(`#${idPrefix}OffsetX`);
+    const inpY = container.querySelector(`#${idPrefix}OffsetY`);
+    const btnClear = container.querySelector(`#${idPrefix}BtnClear`);
+
+    if (selDev) {
+      selDev.addEventListener("change", () => {
+        RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, selDev.value);
+      });
+    }
+
+    if (rngOpacity && lblOpacity) {
+      rngOpacity.addEventListener("input", () => {
+        lblOpacity.textContent = `${rngOpacity.value}%`;
+      });
+    }
+
+    if (selFit && customBox) {
+      selFit.addEventListener("change", () => {
+        customBox.style.display = selFit.value === "custom" ? "block" : "none";
+      });
+    }
+
+    const saveFromEditor = () => {
+      const dev = selDev ? selDev.value : "";
+      if (!dev) return;
+
+      const imgVal = inpImg ? inpImg.value.trim() : "";
+      let fpData = null;
+      if (imgVal) {
+        const opVal = (rngOpacity ? parseInt(rngOpacity.value, 10) : 45) / 100.0;
+        const fitVal = selFit ? selFit.value : "room";
+        fpData = {
+          image: imgVal,
+          opacity: opVal,
+          fit: fitVal
+        };
+        if (fitVal === "custom") {
+          fpData.width = inpW ? parseFloat(inpW.value) || 0 : 0;
+          fpData.depth = inpD ? parseFloat(inpD.value) || 0 : 0;
+          fpData.offsetX = inpX ? parseFloat(inpX.value) || 0 : 0;
+          fpData.offsetY = inpY ? parseFloat(inpY.value) || 0 : 0;
+        }
+      }
+
+      RadarFloorplanManager.saveFloorplan(dev, fpData, editorInstance);
+      const badge = container.querySelector(`#${idPrefix}ActiveBadge`);
+      if (badge) {
+        badge.style.display = fpData ? "inline-block" : "none";
+      }
+    };
+
+    [inpImg, rngOpacity, selFit, inpW, inpD, inpX, inpY].forEach(el => {
+      if (el) {
+        el.addEventListener("input", saveFromEditor);
+        el.addEventListener("change", saveFromEditor);
+      }
+    });
+
+    if (btnClear) {
+      btnClear.addEventListener("click", () => {
+        const dev = selDev ? selDev.value : "";
+        if (!dev) return;
+        RadarFloorplanManager.saveFloorplan(dev, null, editorInstance);
+        RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, dev);
+      });
+    }
+  }
+
+  static _populateEditorFields(container, idPrefix, editorInstance, device) {
+    if (!container) return;
+    const inpImg = container.querySelector(`#${idPrefix}ImageInput`);
+    const rngOpacity = container.querySelector(`#${idPrefix}OpacityRange`);
+    const lblOpacity = container.querySelector(`#${idPrefix}OpacityLabel`);
+    const selFit = container.querySelector(`#${idPrefix}FitSelect`);
+    const customBox = container.querySelector(`#${idPrefix}CustomBox`);
+    const inpW = container.querySelector(`#${idPrefix}Width`);
+    const inpD = container.querySelector(`#${idPrefix}Depth`);
+    const inpX = container.querySelector(`#${idPrefix}OffsetX`);
+    const inpY = container.querySelector(`#${idPrefix}OffsetY`);
+    const badge = container.querySelector(`#${idPrefix}ActiveBadge`);
+
+    const fp = device ? RadarFloorplanManager.getFloorplan(editorInstance._config, device) : null;
+
+    const hasDoc = typeof document !== "undefined";
+    if (inpImg && (!hasDoc || document.activeElement !== inpImg)) {
+      inpImg.value = (fp && fp.image) || "";
+    }
+    const op = fp && fp.opacity !== undefined ? Math.round(fp.opacity * 100) : 45;
+    if (rngOpacity && (!hasDoc || document.activeElement !== rngOpacity)) {
+      rngOpacity.value = op;
+    }
+    if (lblOpacity) {
+      lblOpacity.textContent = `${op}%`;
+    }
+    const isCustom = Boolean(fp && fp.fit === "custom");
+    if (selFit && (!hasDoc || document.activeElement !== selFit)) {
+      selFit.value = isCustom ? "custom" : "room";
+    }
+    if (customBox) {
+      customBox.style.display = isCustom ? "block" : "none";
+    }
+    if (inpW && (!hasDoc || document.activeElement !== inpW)) {
+      inpW.value = (fp && fp.width) || "";
+    }
+    if (inpD && (!hasDoc || document.activeElement !== inpD)) {
+      inpD.value = (fp && fp.depth) || "";
+    }
+    if (inpX && (!hasDoc || document.activeElement !== inpX)) {
+      inpX.value = (fp && fp.offsetX) || "";
+    }
+    if (inpY && (!hasDoc || document.activeElement !== inpY)) {
+      inpY.value = (fp && fp.offsetY) || "";
+    }
+    if (badge) {
+      badge.style.display = (fp && fp.image) ? "inline-block" : "none";
+    }
+  }
+
+  static updateEditorForm(container, idPrefix = "fpEdit", editorInstance) {
+    if (!container || !editorInstance._hass) return;
+    const selDev = container.querySelector(`#${idPrefix}DeviceSelect`);
+    if (!selDev) return;
+
+    const devices = RadarEntityResolver.getDevices(editorInstance._hass);
+    const prevVal = selDev.value;
+
+    let targetDevice = prevVal;
+    if (!targetDevice || !devices.some(d => d.prefix === targetDevice)) {
+      if (editorInstance._config && editorInstance._config.device && devices.some(d => d.prefix === editorInstance._config.device)) {
+        targetDevice = editorInstance._config.device;
+      } else if (devices.length > 0) {
+        targetDevice = devices[0].prefix;
+      } else {
+        targetDevice = "";
+      }
+    }
+
+    selDev.innerHTML = devices.length === 0
+      ? `<option value="">No presence sensors discovered</option>`
+      : devices.map(d => `<option value="${d.prefix}" ${d.prefix === targetDevice ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("");
+
+    selDev.value = targetDevice;
+    RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, targetDevice);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.RadarFloorplanManager = RadarFloorplanManager;
+}
+
+// ====================================================================
 // GUI EDITOR: RADAR MAP CARD EDITOR (Single-Render, Focus Preserving)
 // ====================================================================
 class RadarMapCardEditor extends HTMLElement {
@@ -881,6 +1414,8 @@ class RadarMapCardEditor extends HTMLElement {
             <option value="minimal" ${this._config.layout_mode === "minimal" ? "selected" : ""}>Minimal (Radar View Only)</option>
           </select>
         </div>
+
+        ${RadarFloorplanManager.renderEditorSection("mapFpEdit")}
       </div>
     `;
 
@@ -904,9 +1439,19 @@ class RadarMapCardEditor extends HTMLElement {
       }));
     };
 
-    selDevice.addEventListener("change", notify);
+    selDevice.addEventListener("change", () => {
+      notify();
+      const fpDevSel = this.querySelector("#mapFpEditDeviceSelect");
+      if (fpDevSel && selDevice.value) {
+        fpDevSel.value = selDevice.value;
+        RadarFloorplanManager.updateEditorForm(this, "mapFpEdit", this);
+      }
+    });
     inpTitle.addEventListener("input", notify);
     selLayout.addEventListener("change", notify);
+
+    RadarFloorplanManager.attachEditorEvents(this, "mapFpEdit", this);
+    RadarFloorplanManager.updateEditorForm(this, "mapFpEdit", this);
   }
 
   _updateDeviceOptions() {
@@ -922,6 +1467,8 @@ class RadarMapCardEditor extends HTMLElement {
       ${devices.map(d => `<option value="${d.prefix}" ${curVal === d.prefix ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("")}
     `;
     sel.value = curVal;
+
+    RadarFloorplanManager.updateEditorForm(this, "mapFpEdit", this);
   }
 
   _updateFormValues() {
@@ -938,6 +1485,7 @@ class RadarMapCardEditor extends HTMLElement {
     if (selLayout && document.activeElement !== selLayout) {
       selLayout.value = this._config.layout_mode || "full";
     }
+    RadarFloorplanManager.updateEditorForm(this, "mapFpEdit", this);
   }
 }
 
@@ -2068,6 +2616,7 @@ class RadarMapCard extends HTMLElement {
             <div class="chip" id="chipTargets">🎯 0 Targets</div>
             <div class="chip" id="chipLatched" style="display:none;">🧠 Latched</div>
             <div class="chip" id="chipWifi">📶 -- dBm</div>
+            <button class="chip" id="btnMapFloorplan" title="Configure Floorplan Overlay for this sensor" style="cursor:pointer; background:rgba(56, 189, 248, 0.12); border:1px solid rgba(56, 189, 248, 0.35); color:#38bdf8; font-weight:700;">🖼️ Floorplan</button>
           </div>
         </div>
 
@@ -2097,6 +2646,9 @@ class RadarMapCard extends HTMLElement {
                 <line x1="0" y1="0" x2="0" y2="80" stroke="#ef4444" stroke-width="20" stroke-opacity="0.35" />
               </pattern>
             </defs>
+
+            <!-- Floorplan Background Layer -->
+            <g id="mapFloorplanLayer"></g>
 
             <!-- Room Boundaries & Walls -->
             <g id="roomLayer"></g>
@@ -2134,10 +2686,19 @@ class RadarMapCard extends HTMLElement {
           <div class="zone-pill" id="pillZ4">Zone 4</div>
         </div>
         ${RadarSetupWizard.renderModalHtml("mapWz", this._hass)}
+        ${RadarFloorplanManager.renderModalHtml("mapFp")}
       </ha-card>
     `;
 
     RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz", null, this);
+    RadarFloorplanManager.attachEvents(this.shadowRoot, "mapFp", this);
+
+    const btnMapFp = this.shadowRoot.getElementById("btnMapFloorplan");
+    if (btnMapFp) {
+      btnMapFp.addEventListener("click", () => {
+        RadarFloorplanManager.open(this.shadowRoot, "mapFp", this._selectedDevice, this);
+      });
+    }
     RadarUpdateManager.attachEvents(this.shadowRoot, "mapUpd", this._selectedDevice, this);
 
     const selectEl = this.shadowRoot.getElementById("mapDeviceSelect");
@@ -2282,6 +2843,13 @@ class RadarMapCard extends HTMLElement {
         clipRect.setAttribute("width", geom.roomWidth);
         clipRect.setAttribute("height", geom.roomDepth);
       }
+    }
+
+    // Render Floorplan Layer
+    const fp = RadarFloorplanManager.getFloorplan(this._config, this._selectedDevice);
+    const mapFpLayer = this.shadowRoot.getElementById("mapFloorplanLayer");
+    if (mapFpLayer) {
+      radarSetHtml(mapFpLayer, RadarFloorplanManager.renderFloorplanSvg(fp, geom, "radarRoomClip"));
     }
 
     // Render Room Walls
@@ -2527,6 +3095,8 @@ class RadarCalibrationCardEditor extends HTMLElement {
           <input type="text" id="editorCalTitleInput" value="${this._config.title || "Presence Onboarding & Calibration Suite"}"
                  style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); box-sizing:border-box;" />
         </div>
+
+        ${RadarFloorplanManager.renderEditorSection("calFpEdit")}
       </div>
     `;
 
@@ -2548,8 +3118,18 @@ class RadarCalibrationCardEditor extends HTMLElement {
       }));
     };
 
-    selDevice.addEventListener("change", notify);
+    selDevice.addEventListener("change", () => {
+      notify();
+      const fpDevSel = this.querySelector("#calFpEditDeviceSelect");
+      if (fpDevSel && selDevice.value) {
+        fpDevSel.value = selDevice.value;
+        RadarFloorplanManager.updateEditorForm(this, "calFpEdit", this);
+      }
+    });
     inpTitle.addEventListener("input", notify);
+
+    RadarFloorplanManager.attachEditorEvents(this, "calFpEdit", this);
+    RadarFloorplanManager.updateEditorForm(this, "calFpEdit", this);
   }
 
   _updateDeviceOptions() {
@@ -2565,6 +3145,8 @@ class RadarCalibrationCardEditor extends HTMLElement {
       ${devices.map(d => `<option value="${d.prefix}" ${curVal === d.prefix ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("")}
     `;
     sel.value = curVal;
+
+    RadarFloorplanManager.updateEditorForm(this, "calFpEdit", this);
   }
 
   _updateFormValues() {
@@ -2577,6 +3159,7 @@ class RadarCalibrationCardEditor extends HTMLElement {
     if (selDevice && document.activeElement !== selDevice) {
       selDevice.value = this._config.device || "";
     }
+    RadarFloorplanManager.updateEditorForm(this, "calFpEdit", this);
   }
 }
 
@@ -3746,7 +4329,10 @@ class RadarCalibrationCard extends HTMLElement {
           <div class="vf-header-title">
             <span>📡 Live Radar Map & Viewfinder</span>
           </div>
-          <div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <button id="btnCalFloorplan" class="btn-vf-edit" title="Configure Floorplan Overlay for this sensor">
+              🖼️ Floorplan
+            </button>
             <button id="btnToggleMapEdit" class="btn-vf-edit ${this._mapEditMode ? "active" : ""}" title="Toggle Interactive Drag & Drop Map Editor">
               ${this._mapEditMode ? "✏️ Done Editing" : "✏️ Edit Map"}
             </button>
@@ -3759,6 +4345,9 @@ class RadarCalibrationCard extends HTMLElement {
             <span class="vf-edit-hint">Drag walls to resize room • Drag sensor or beam to reposition • Drag/stretch zones</span>
           </div>
           <div style="display:flex; align-items:center; gap:6px;">
+            <button id="btnEditFloorplan" class="btn-vf-snap" title="Floorplan Overlay Settings">
+              🖼️ Floorplan
+            </button>
             <button id="btnToggleSnap" class="btn-vf-snap" title="Toggle Grid Snapping">
               🧲 Snap: ${this._mapSnapGrid ? this._mapSnapGrid + "mm" : "Off"}
             </button>
@@ -3783,7 +4372,11 @@ class RadarCalibrationCard extends HTMLElement {
               <pattern id="vfExclusionHatch" width="80" height="80" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
                 <line x1="0" y1="0" x2="0" y2="80" stroke="#ef4444" stroke-width="20" stroke-opacity="0.35" />
               </pattern>
+              <clipPath id="vfRoomClip">
+                <rect id="vfRoomClipRect" x="0" y="0" width="4000" height="5000" rx="6" />
+              </clipPath>
             </defs>
+            <g id="vfFloorplanLayer"></g>
             <g id="vfRoomLayer"></g>
             <g id="vfZonesLayer"></g>
             <g id="vfMasksLayer"></g>
@@ -3956,10 +4549,18 @@ class RadarCalibrationCard extends HTMLElement {
           </div>
         </div>
         ${RadarSetupWizard.renderModalHtml("calWz", this._hass)}
+        ${RadarFloorplanManager.renderModalHtml("calFp")}
       </ha-card>
     `;
 
     RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", (msg) => this._showToast(msg), this);
+    RadarFloorplanManager.attachEvents(this.shadowRoot, "calFp", this);
+
+    const openFp = () => RadarFloorplanManager.open(this.shadowRoot, "calFp", this._selectedDevice, this);
+    const btnCalFp = this.shadowRoot.getElementById("btnCalFloorplan");
+    if (btnCalFp) btnCalFp.addEventListener("click", openFp);
+    const btnEditFp = this.shadowRoot.getElementById("btnEditFloorplan");
+    if (btnEditFp) btnEditFp.addEventListener("click", openFp);
     RadarUpdateManager.attachEvents(this.shadowRoot, "calUpd", this._selectedDevice, this);
 
     this._bindEvents();
@@ -4908,6 +5509,13 @@ class RadarCalibrationCard extends HTMLElement {
         vfClipRect.setAttribute("width", rw);
         vfClipRect.setAttribute("height", rd);
       }
+    }
+
+    // 1b. Update Floorplan Layer
+    const calFp = RadarFloorplanManager.getFloorplan(this._config, this._selectedDevice);
+    const vfFpLayer = this.shadowRoot.getElementById("vfFloorplanLayer");
+    if (vfFpLayer) {
+      radarSetHtml(vfFpLayer, RadarFloorplanManager.renderFloorplanSvg(calFp, previewGeom, "vfRoomClip"));
     }
 
     // 2. Update Room Walls
