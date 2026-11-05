@@ -7,7 +7,7 @@
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.8.1";
+const CARD_VERSION = "1.8.2";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [
@@ -47,26 +47,98 @@ console.info(
 // ====================================================================
 // UTILITY: Robust Dynamic Entity Discovery & Fuzzy Resolution
 // ====================================================================
+// Shared last-known-good state cache: keeps zone / room / version values stable while
+// ESPHome entities are briefly "unavailable" (e.g. during an integration reload).
+const RADAR_LKG = {};
+
+function radarStableHass(hass) {
+  if (!hass || !hass.states) return hass;
+  const raw = hass.states;
+  const read = (prop) => {
+    const s = raw[prop];
+    if (typeof prop !== "string" || prop.indexOf(".") === -1) return s;
+    if (s && s.state !== "unavailable" && s.state !== "unknown") {
+      RADAR_LKG[prop] = s;
+      return s;
+    }
+    return RADAR_LKG[prop] || s;
+  };
+  // Proxy over an empty target (avoids invariant issues if hass.states is ever frozen)
+  const states = new Proxy({}, {
+    get: (_t, prop) => read(prop),
+    has: (_t, prop) => (prop in raw) || (prop in RADAR_LKG),
+    ownKeys: () => Reflect.ownKeys(raw),
+    getOwnPropertyDescriptor: (_t, prop) => (prop in raw)
+      ? { value: read(prop), enumerable: true, configurable: true, writable: false }
+      : undefined
+  });
+  const h = Object.create(hass);
+  Object.defineProperty(h, "states", { value: states, enumerable: true });
+  return h;
+}
+
+function radarForgetStates(ids) {
+  for (const id of ids || []) delete RADAR_LKG[id];
+}
+
+// Only touch the DOM when the generated markup actually changed (prevents hover replay / lost clicks)
+function radarSetHtml(el, html) {
+  if (!el) return false;
+  if (el.__radarHtml === html) return false;
+  el.innerHTML = html;
+  el.__radarHtml = html;
+  return true;
+}
+
+function radarSlug(str) {
+  return String(str || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 class RadarEntityResolver {
   static _registryCache = null;
   static _registryMap = null;
+  static _registryVersion = 0;
   static _fetchingRegistry = false;
+  static _registryFailedAt = 0;
+  static _registryListeners = new Set();
 
-  static async loadEntityRegistry(hass) {
-    if (this._registryCache || !hass || !hass.callWS) return;
+  static onRegistryChange(cb) {
+    this._registryListeners.add(cb);
+    return () => this._registryListeners.delete(cb);
+  }
+
+  static _notifyRegistry() {
+    this._registryVersion++;
+    for (const cb of Array.from(this._registryListeners)) {
+      try { cb(); } catch (e) { console.warn("[PRESENCE-RADAR-CARDS] registry listener failed", e); }
+    }
+  }
+
+  static async loadEntityRegistry(hass, force = false) {
+    if (!hass || !hass.callWS) return;
+    if (this._registryCache && !force) return;
     if (this._fetchingRegistry) return;
+    // Back off for 60s after a failure instead of retrying on every hass update
+    if (!force && this._registryFailedAt && (Date.now() - this._registryFailedAt) < 60000) return;
     this._fetchingRegistry = true;
     try {
       const list = await hass.callWS({ type: "config/entity_registry/list" });
       if (Array.isArray(list)) {
         this._registryCache = list.map(e => e.entity_id);
         this._registryMap = new Map(list.map(e => [e.entity_id, e]));
+        this._registryFailedAt = 0;
+        this._notifyRegistry();
       }
     } catch (e) {
-      // Non-admin or unsupported
+      this._registryFailedAt = Date.now();
+      console.warn("[PRESENCE-RADAR-CARDS] Could not load entity registry:", e);
     } finally {
       this._fetchingRegistry = false;
     }
+  }
+
+  static refreshEntityRegistry(hass) {
+    return this.loadEntityRegistry(hass, true);
   }
 
   static getDevices(hass) {
@@ -142,10 +214,18 @@ class RadarEntityResolver {
     }
 
     // Infer zonePrefix from existing zone config entities (e.g. handles double-area prefixes like living_room_living_room_presence)
+    const stateIds = Object.keys(states);
+    const pickSample = (domain, suffix) => stateIds.find(id => {
+      if (!id.startsWith(domain + ".") || !id.endsWith(suffix)) return false;
+      const entPrefix = id.slice(domain.length + 1, id.length - suffix.length);
+      if (otherDevicePrefixes.has(entPrefix)) return false;
+      const idTokens = entPrefix.toLowerCase().split(/[_-\s]+/);
+      return tokens.every(t => idTokens.includes(t));
+    });
     let zonePrefix = rawPrefix;
-    const sampleCal = Object.keys(states).find(id => id.startsWith("select.") && id.endsWith("_zone_to_calibrate") && tokens.every(t => id.includes(t))) ||
-                      Object.keys(states).find(id => id.startsWith("button.") && id.endsWith("_set_zone_corner_1") && tokens.every(t => id.includes(t))) ||
-                      Object.keys(states).find(id => id.startsWith("number.") && id.endsWith("_zone_off_delay") && tokens.every(t => id.includes(t)));
+    const sampleCal = pickSample("select", "_zone_to_calibrate") ||
+                      pickSample("button", "_set_zone_corner_1") ||
+                      pickSample("number", "_zone_off_delay");
     if (sampleCal) {
       const domainEnd = sampleCal.indexOf(".");
       const suffixIdx = sampleCal.indexOf("_zone_");
@@ -153,6 +233,49 @@ class RadarEntityResolver {
         zonePrefix = sampleCal.slice(domainEnd + 1, suffixIdx);
       }
     }
+
+    // Registry-backed, device-scoped lookup. Robust against mixed entity-ID naming within one
+    // device (e.g. front_bedroom_presence_zone_4_* vs front_spare_bedroom_front_bedroom_presence_zone_5_*).
+    let deviceIndex = null;
+    let deviceEntries = null;
+    const regMap = RadarEntityResolver._registryMap;
+    if (regMap) {
+      const anchorIds = [
+        "sensor." + rawPrefix + "_target_1_x", "sensor." + canonicalPrefix + "_target_1_x",
+        "sensor." + rawPrefix + "_t1_x", "sensor." + canonicalPrefix + "_t1_x"
+      ];
+      let deviceId = null;
+      for (const id of anchorIds) {
+        const e = regMap.get(id) || (hass && hass.entities && hass.entities[id]);
+        if (e && e.device_id) { deviceId = e.device_id; break; }
+      }
+      if (deviceId) {
+        deviceEntries = [];
+        deviceIndex = new Map();
+        for (const e of regMap.values()) {
+          if (e.device_id !== deviceId) continue;
+          deviceEntries.push(e);
+          const domain = e.entity_id.split(".")[0];
+          const nameKey = radarSlug(e.original_name || e.name);
+          if (nameKey && !deviceIndex.has(domain + "." + nameKey)) {
+            deviceIndex.set(domain + "." + nameKey, e.entity_id);
+          }
+        }
+      }
+    }
+    const findOnDevice = (domain, key) => {
+      if (!deviceIndex) return null;
+      const byName = deviceIndex.get(domain + "." + key);
+      if (byName) return byName;
+      const suffix = "_" + key;
+      const hits = deviceEntries.filter(e => e.entity_id.startsWith(domain + ".") && e.entity_id.endsWith(suffix) &&
+        !(key.startsWith("zone_") && e.entity_id.includes("exclusion_" + key)));
+      if (hits.length > 0) {
+        hits.sort((a, b) => a.entity_id.length - b.entity_id.length);
+        return hits[0].entity_id;
+      }
+      return null;
+    };
 
     const findDirect = (domain, key, fallbackPrefix = canonicalPrefix) => {
       const reg = (hass && hass.entities) || {};
@@ -167,6 +290,9 @@ class RadarEntityResolver {
 
     const findEntity = (domain, key, fallbackPrefix = canonicalPrefix) => {
       const pref = key.startsWith("zone_") ? zonePrefix : fallbackPrefix;
+      // 0. Device-scoped registry match (includes disabled entities)
+      const onDevice = findOnDevice(domain, key);
+      if (onDevice) return onDevice;
       // 1. Direct match with pref, rawPrefix, and canonicalPrefix
       const exact = findDirect(domain, key, pref) || findDirect(domain, key, rawPrefix) || findDirect(domain, key, canonicalPrefix);
       if (exact) return exact;
@@ -398,14 +524,19 @@ class RadarEntityResolver {
     return !(x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0);
   }
 
+  static isZoneRegistryDisabled(entities, z) {
+    if (!entities || !this._registryMap) return null;
+    const occId = entities[`zone${z}_occupancy`];
+    if (!occId || !this._registryMap.has(occId)) return null;
+    return Boolean(this._registryMap.get(occId).disabled_by);
+  }
+
   static isZoneEnabled(hass, entities, z) {
     if (!entities) return false;
     const occId = entities[`zone${z}_occupancy`];
     if (!occId) return false;
-    if (this._registryMap && this._registryMap.has(occId)) {
-      const reg = this._registryMap.get(occId);
-      return !reg.disabled_by;
-    }
+    const regDisabled = this.isZoneRegistryDisabled(entities, z);
+    if (regDisabled !== null) return !regDisabled;
     if (hass && hass.entities && hass.entities[occId]) {
       return !hass.entities[occId].disabled;
     }
@@ -415,6 +546,8 @@ class RadarEntityResolver {
 
   static isZoneActive(hass, entities, z, locallyEnabled = null) {
     if (locallyEnabled && locallyEnabled.has(z)) return true;
+    // A zone explicitly disabled in the HA registry is never active, even if stale coordinates linger
+    if (this.isZoneRegistryDisabled(entities, z) === true) return false;
     return this.isZoneConfigured(hass, entities, z) || this.isZoneEnabled(hass, entities, z);
   }
 
@@ -433,18 +566,6 @@ class RadarEntityResolver {
 // VISIBILITY MANAGER: Dynamic Enable / Disable of Zone Entities in HA
 // ====================================================================
 class RadarVisibilityManager {
-  static _synced = {};
-
-  static clearCache(device) {
-    if (device) {
-      for (const k of Object.keys(this._synced)) {
-        if (k.startsWith(`${device}_`)) delete this._synced[k];
-      }
-    } else {
-      this._synced = {};
-    }
-  }
-
   static getZoneEntities(entities, z) {
     if (!entities) return [];
     return [
@@ -460,105 +581,71 @@ class RadarVisibilityManager {
     ].filter(Boolean);
   }
 
-  static async enableZone(hass, entities, z) {
-    if (!hass || !entities) return;
-    const ents = this.getZoneEntities(entities, z);
+  static canEditRegistry(hass) {
+    return !(hass && hass.user && hass.user.is_admin === false);
+  }
+
+  // Updates all entities of a zone in parallel. Returns { ok, okCount, total, configEntryId }.
+  static async _setZoneDisabled(hass, entities, z, disabledBy) {
+    const regMap = RadarEntityResolver._registryMap;
+    const all = this.getZoneEntities(entities, z);
+    // Only touch entities that really exist in the registry (when we know it)
+    const targets = regMap ? all.filter(id => regMap.has(id)) : all;
+    if (targets.length === 0) return { ok: false, reason: "notfound", okCount: 0, total: 0, configEntryId: null };
+
     let configEntryId = null;
+    const results = await Promise.all(targets.map(async (entityId) => {
+      const before = regMap ? regMap.get(entityId) : null;
+      if (!configEntryId && before && before.config_entry_id) configEntryId = before.config_entry_id;
+      try {
+        const res = await hass.callWS({
+          type: "config/entity_registry/update",
+          entity_id: entityId,
+          disabled_by: disabledBy
+        });
+        const entry = (res && res.entity_entry) ? res.entity_entry : null;
+        if (!configEntryId && entry && entry.config_entry_id) configEntryId = entry.config_entry_id;
+        if (regMap) {
+          regMap.set(entityId, Object.assign({}, before || {}, entry || {}, { disabled_by: disabledBy }));
+        }
+        return true;
+      } catch (e) {
+        console.warn(`[PRESENCE-RADAR-CARDS] Failed to set disabled_by=${disabledBy} on`, entityId, e);
+        return false;
+      }
+    }));
+    const okCount = results.filter(Boolean).length;
+    return { ok: okCount === targets.length, reason: okCount ? null : "failed", okCount, total: targets.length, configEntryId };
+  }
 
-    for (const entityId of ents) {
-      if (RadarEntityResolver._registryMap && RadarEntityResolver._registryMap.has(entityId)) {
-        const item = RadarEntityResolver._registryMap.get(entityId);
-        item.disabled_by = null;
-        if (!configEntryId && item.config_entry_id) {
-          configEntryId = item.config_entry_id;
-        }
-      }
-      if (hass.entities && hass.entities[entityId]) {
-        hass.entities[entityId].disabled = false;
-        hass.entities[entityId].disabled_by = null;
-      }
-      if (hass.callWS) {
-        try {
-          await hass.callWS({
-            type: "config/entity_registry/update",
-            entity_id: entityId,
-            disabled_by: null
-          });
-        } catch (e) {
-          console.warn("Failed to enable zone entity in registry:", entityId, e);
-        }
-      }
-    }
+  static async enableZone(hass, entities, z) {
+    if (!hass || !entities || !hass.callWS) return { ok: false, reason: "unavailable", okCount: 0, total: 0 };
+    if (!this.canEditRegistry(hass)) return { ok: false, reason: "admin", okCount: 0, total: 0 };
+    const res = await this._setZoneDisabled(hass, entities, z, null);
+    RadarEntityResolver._notifyRegistry();
 
-    // Reload integration config entry so ESPHome initializes the newly enabled entities in HA
-    if (hass.callService) {
-      if (configEntryId) {
-        try {
-          await hass.callService("homeassistant", "reload_config_entry", { entry_id: configEntryId });
-        } catch (e) {}
+    // ONE immediate integration reload so ESPHome creates the newly enabled entities (fire-and-forget).
+    // HA also schedules its own reload ~30s later; last-known-good caching keeps the UI stable through both.
+    if (res.okCount > 0 && hass.callService) {
+      let p = null;
+      if (res.configEntryId) {
+        p = hass.callService("homeassistant", "reload_config_entry", { entry_id: res.configEntryId });
+      } else if (entities.target1_x) {
+        p = hass.callService("homeassistant", "reload_config_entry", {}, { entity_id: entities.target1_x });
       }
-      const targetEntity = entities.target1_x || ents[0];
-      if (targetEntity) {
-        try {
-          await hass.callService("homeassistant", "reload_config_entry", {}, { entity_id: targetEntity });
-        } catch (e) {
-          try {
-            await hass.callService("homeassistant", "reload_config_entry", { entity_id: targetEntity });
-          } catch (e2) {}
-        }
-      }
+      if (p && p.catch) p.catch(e => console.warn("[PRESENCE-RADAR-CARDS] reload_config_entry failed", e));
     }
+    return res;
   }
 
   static async disableZone(hass, entities, z) {
-    if (!hass || !entities) return;
-    const ents = this.getZoneEntities(entities, z);
-    let configEntryId = null;
-
-    for (const entityId of ents) {
-      if (RadarEntityResolver._registryMap && RadarEntityResolver._registryMap.has(entityId)) {
-        const item = RadarEntityResolver._registryMap.get(entityId);
-        item.disabled_by = "user";
-        if (!configEntryId && item.config_entry_id) {
-          configEntryId = item.config_entry_id;
-        }
-      }
-      if (hass.entities && hass.entities[entityId]) {
-        hass.entities[entityId].disabled = true;
-        hass.entities[entityId].disabled_by = "user";
-      }
-      if (hass.callWS) {
-        try {
-          await hass.callWS({
-            type: "config/entity_registry/update",
-            entity_id: entityId,
-            disabled_by: "user"
-          });
-        } catch (e) {
-          console.warn("Failed to disable zone entity in registry:", entityId, e);
-        }
-      }
-    }
-
-    // Reload integration config entry
-    if (hass.callService) {
-      if (configEntryId) {
-        try {
-          await hass.callService("homeassistant", "reload_config_entry", { entry_id: configEntryId });
-        } catch (e) {}
-      }
-      const targetEntity = entities.target1_x || ents[0];
-      if (targetEntity) {
-        try {
-          await hass.callService("homeassistant", "reload_config_entry", {}, { entity_id: targetEntity });
-        } catch (e) {}
-      }
-    }
-  }
-
-  static async sync(hass, entities, selectedDevice, locallyEnabled = null) {
-    // Automatic background sync should never disable zones.
-    // Zones are disabled only by user action or by default firmware state.
+    if (!hass || !entities || !hass.callWS) return { ok: false, reason: "unavailable", okCount: 0, total: 0 };
+    if (!this.canEditRegistry(hass)) return { ok: false, reason: "admin", okCount: 0, total: 0 };
+    const res = await this._setZoneDisabled(hass, entities, z, "user");
+    // HA removes disabled entities immediately - no integration reload needed.
+    radarForgetStates(this.getZoneEntities(entities, z));
+    RadarEntityResolver._notifyRegistry();
+    return res;
   }
 }
 
@@ -1055,11 +1142,12 @@ class RadarUpdateManager {
     const btnDismiss = shadowRoot.getElementById(`${idPrefix}BtnDismissBanner`);
     if (btnDismiss) {
       btnDismiss.addEventListener("click", () => {
-        this.dismiss(devicePrefix);
+        const dev = (cardInstance && cardInstance._selectedDevice) || devicePrefix;
+        this.dismiss(dev);
         const container = shadowRoot.getElementById(`${idPrefix}UpdateBannerContainer`);
         if (container) {
           container.innerHTML = "";
-          container.dataset.statusKey = `${devicePrefix}_dismissed`;
+          container.dataset.statusKey = `${dev}_dismissed`;
         }
       });
     }
@@ -1067,7 +1155,7 @@ class RadarUpdateManager {
     const btnUpdate = shadowRoot.getElementById(`${idPrefix}BtnTriggerUpdate`);
     if (btnUpdate) {
       btnUpdate.addEventListener("click", () => {
-        const status = this.checkStatus(cardInstance._hass, cardInstance._entities, devicePrefix);
+        const status = this.checkStatus(radarStableHass(cardInstance._hass), cardInstance._entities, cardInstance._selectedDevice || devicePrefix);
         if (status && status.updateEntity && cardInstance._hass.states[status.updateEntity]) {
           cardInstance._openMoreInfo(status.updateEntity);
         }
@@ -1348,7 +1436,11 @@ class RadarMapCard extends HTMLElement {
       this._selectedDevice = this._config.device;
     }
 
-    if (this._rendered) {
+    if (this._rendered && this._hass) {
+      this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+      this._trails = { 1: [], 2: [], 3: [] };
+      this._watchIds = null;
+      this._lastSig = null;
       this._render();
       this._update();
     }
@@ -1358,15 +1450,19 @@ class RadarMapCard extends HTMLElement {
     this._syncHandler = (e) => {
       // Only follow external sync if this card is set to "Select on drop-down" (not pinned)
       if (!this._config.device && e.detail && e.detail.device && e.detail.device !== this._selectedDevice) {
-        this._selectedDevice = e.detail.device;
-        if (this._hass) {
-          this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
-          this._render();
-          this._update();
-        }
+        this._switchDevice(e.detail.device, false);
       }
     };
     window.addEventListener("radar-device-selected", this._syncHandler);
+
+    // Re-resolve entity IDs once the HA entity registry arrives / changes
+    this._unsubRegistry = RadarEntityResolver.onRegistryChange(() => {
+      if (!this._hass || !this._rendered || this._emptyState) return;
+      this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+      this._watchIds = null;
+      this._lastSig = null;
+      this._update();
+    });
   }
 
   disconnectedCallback() {
@@ -1374,6 +1470,41 @@ class RadarMapCard extends HTMLElement {
       window.removeEventListener("radar-device-selected", this._syncHandler);
       this._syncHandler = null;
     }
+    if (this._unsubRegistry) {
+      this._unsubRegistry();
+      this._unsubRegistry = null;
+    }
+  }
+
+  _switchDevice(device, broadcast) {
+    this._selectedDevice = device;
+    this._trails = { 1: [], 2: [], 3: [] };
+    this._watchIds = null;
+    this._lastSig = null;
+    if (!this._hass) return;
+    this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+    const sel = this.shadowRoot.getElementById("mapDeviceSelect");
+    if (sel && sel.value !== device) sel.value = device;
+    if (broadcast) {
+      window.dispatchEvent(new CustomEvent("radar-device-selected", { detail: { device } }));
+    }
+    this._update();
+  }
+
+  // Signature of this device's entity states - lets us ignore the (very frequent)
+  // hass updates caused by unrelated entities elsewhere in Home Assistant.
+  _computeSig() {
+    const ent = this._entities || {};
+    if (!this._watchIds) {
+      this._watchIds = Object.values(ent).filter(v => typeof v === "string" && v.indexOf(".") > 0);
+    }
+    const states = this._hass.states;
+    let sig = RadarEntityResolver._registryVersion + "|";
+    for (const id of this._watchIds) {
+      const s = states[id];
+      sig += (s ? s.state : "-") + "|";
+    }
+    return sig;
   }
 
   set hass(hass) {
@@ -1395,13 +1526,35 @@ class RadarMapCard extends HTMLElement {
       this._entities = RadarEntityResolver.resolve(hass, { device: this._selectedDevice });
       this._render();
       this._rendered = true;
+      this._lastSig = null;
+    } else if (this._emptyState || (this._entities && !hass.states[this._entities.target1_x])) {
+      // Throttled re-discovery so the card enters / leaves the empty state without a page reload
+      const now = Date.now();
+      if (!this._lastDevCheck || now - this._lastDevCheck > 3000) {
+        this._lastDevCheck = now;
+        const devs = RadarEntityResolver.getDevices(hass);
+        if ((devs.length > 0) === Boolean(this._emptyState)) {
+          if (devs.length > 0 && !devs.some(d => d.prefix === this._selectedDevice)) {
+            this._selectedDevice = (this._config && this._config.device) || devs[0].prefix;
+          }
+          this._entities = RadarEntityResolver.resolve(hass, { device: this._selectedDevice });
+          this._watchIds = null;
+          this._lastSig = null;
+          this._render();
+        }
+      }
     }
 
+    if (this._emptyState) return;
+    const sig = this._computeSig();
+    if (sig === this._lastSig) return;
+    this._lastSig = sig;
     this._update();
   }
 
   _render() {
     const devices = RadarEntityResolver.getDevices(this._hass);
+    this._emptyState = devices.length === 0;
 
     if (devices.length === 0) {
       this.shadowRoot.innerHTML = `
@@ -1995,13 +2148,7 @@ class RadarMapCard extends HTMLElement {
           RadarSetupWizard.open(this.shadowRoot, "mapWz");
           return;
         }
-        this._selectedDevice = e.target.value;
-        this._locallyEnabledZones = new Set();
-        this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
-        window.dispatchEvent(new CustomEvent("radar-device-selected", {
-          detail: { device: this._selectedDevice }
-        }));
-        this._update();
+        this._switchDevice(e.target.value, true);
       });
     }
 
@@ -2063,14 +2210,12 @@ class RadarMapCard extends HTMLElement {
     if (!this._entities) {
       this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
     }
-    RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", this._hass, this._entities, this._selectedDevice, this);
-    RadarUpdateManager.updateBanner(this.shadowRoot, "mapUpd", this._hass, this._entities, this._selectedDevice, this);
+    const stableHass = radarStableHass(this._hass);
+    RadarUpdateManager.updateBanner(this.shadowRoot, "mapUpd", stableHass, this._entities, this._selectedDevice, this);
 
     const ent = this._entities;
-    const states = this._hass.states;
-
-    // Automatic Entity Visibility Sync in HA (silent background check)
-    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+    const states = this._hass.states;   // live values (targets, chips)
+    const sStates = stableHass.states;  // last-known-good values (zones, room geometry)
 
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
@@ -2078,6 +2223,14 @@ class RadarMapCard extends HTMLElement {
       return isNaN(v) ? def : v;
     };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+    const getValS = (id, def = 0) => {
+      if (!id || !sStates[id]) return def;
+      const v = parseFloat(sStates[id].state);
+      return isNaN(v) ? def : v;
+    };
+    const getStateS = (id, def = "off") => (id && sStates[id]) ? sStates[id].state : def;
+    const t1State = states[ent.target1_x];
+    const isOffline = !t1State || t1State.state === "unavailable";
 
     // Header Chips
     const occ = getState(ent.occupancy, "off") === "on";
@@ -2109,13 +2262,13 @@ class RadarMapCard extends HTMLElement {
     const wifi = states[ent.wifi_signal] ? states[ent.wifi_signal].state : "--";
     const chipWifi = this.shadowRoot.getElementById("chipWifi");
     if (chipWifi) {
-      chipWifi.textContent = `📶 ${wifi} dBm`;
+      chipWifi.textContent = isOffline ? "⏳ Reconnecting…" : `📶 ${wifi} dBm`;
       chipWifi.dataset.entity = ent.wifi_signal || "";
       chipWifi.title = ent.wifi_signal ? `Click to view history (${ent.wifi_signal})` : "Wi-Fi Signal";
     }
 
     // Geometry Calculation directly from ESP32 Sensor
-    const geom = RoomGeometry.compute(this._config, ent, this._hass);
+    const geom = RoomGeometry.compute(this._config, ent, stableHass);
 
     // Update SVG ViewBox and Room Clip based on room dimensions (expands if sensor offset exceeds room wall)
     const svg = this.shadowRoot.getElementById("radarSvg");
@@ -2134,7 +2287,7 @@ class RadarMapCard extends HTMLElement {
     // Render Room Walls
     const roomLayer = this.shadowRoot.getElementById("roomLayer");
     if (roomLayer) {
-      roomLayer.innerHTML = `
+      radarSetHtml(roomLayer, `
         <!-- Outer Architectural Wall -->
         <rect x="0" y="0" width="${geom.roomWidth}" height="${geom.roomDepth}"
               fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="8" rx="6" />
@@ -2146,7 +2299,7 @@ class RadarMapCard extends HTMLElement {
               transform="rotate(-90, -120, ${geom.roomDepth / 2})">
           ${Math.round(geom.roomDepth)} mm
         </text>
-      `;
+      `);
     }
 
     // Render Sensor Icon & Angled Beam Cone
@@ -2155,10 +2308,10 @@ class RadarMapCard extends HTMLElement {
     if (sensorIconLayer && beamCone) {
       const sx = geom.sx;
       const sy = 0;
-      sensorIconLayer.innerHTML = `
+      radarSetHtml(sensorIconLayer, `
         <circle cx="${sx}" cy="${sy}" r="120" fill="#0284c7" stroke="#38bdf8" stroke-width="12" />
         <circle cx="${sx}" cy="${sy}" r="40" fill="#fff" />
-      `;
+      `);
 
       const beamDist = Math.max(geom.roomWidth, geom.roomDepth) * 1.3;
       const radCenter = (((geom.angle || 0) + 90) * Math.PI) / 180;
@@ -2175,24 +2328,24 @@ class RadarMapCard extends HTMLElement {
     }
 
     // Render Zones & Exclusion Masks
-    const activeZonesList = RadarEntityResolver.getActiveZones(this._hass, ent);
+    const activeZonesList = RadarEntityResolver.getActiveZones(stableHass, ent);
     const zonesRow = this.shadowRoot.getElementById("zonesRow");
     if (zonesRow) {
       if (activeZonesList.length === 0) {
-        zonesRow.innerHTML = "";
+        radarSetHtml(zonesRow, "");
         zonesRow.style.display = "none";
       } else {
         const isMinimal = this._config && this._config.layout_mode === "minimal";
         zonesRow.style.display = isMinimal ? "none" : "grid";
         let pillsHtml = "";
         for (const z of activeZonesList) {
-          const x1 = getVal(ent[`zone${z}_x1`]);
-          const y1 = getVal(ent[`zone${z}_y1`]);
-          const x2 = getVal(ent[`zone${z}_x2`]);
-          const y2 = getVal(ent[`zone${z}_y2`]);
+          const x1 = getValS(ent[`zone${z}_x1`]);
+          const y1 = getValS(ent[`zone${z}_y1`]);
+          const x2 = getValS(ent[`zone${z}_x2`]);
+          const y2 = getValS(ent[`zone${z}_y2`]);
           const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
-          const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
-          const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
+          const zOcc = getStateS(ent[`zone${z}_occupancy`]) === "on";
+          const isExcl = getStateS(ent[`zone${z}_mode`]) === "Exclusion";
           const zEntity = ent[`zone${z}_occupancy`] || "";
 
           const cls = "zone-pill" +
@@ -2201,7 +2354,7 @@ class RadarMapCard extends HTMLElement {
           const label = `Z${z}${isExcl ? " (Mask)" : ""}${zOcc ? (isExcl ? " ⚠️" : " (OCC)") : ""}`;
           pillsHtml += `<div class="${cls}" id="pillZ${z}" data-entity="${zEntity}" title="${zEntity ? `Click to view Zone ${z} history (${zEntity})` : `Zone ${z}`}">${label}</div>`;
         }
-        zonesRow.innerHTML = pillsHtml;
+        radarSetHtml(zonesRow, pillsHtml);
       }
     }
 
@@ -2209,13 +2362,13 @@ class RadarMapCard extends HTMLElement {
     if (zonesLayer) {
       let zonesHtml = "";
       for (const z of activeZonesList) {
-        const x1 = getVal(ent[`zone${z}_x1`]);
-        const y1 = getVal(ent[`zone${z}_y1`]);
-        const x2 = getVal(ent[`zone${z}_x2`]);
-        const y2 = getVal(ent[`zone${z}_y2`]);
-        const zAngle = getVal(ent[`zone${z}_angle`], 0);
-        const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
-        const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
+        const x1 = getValS(ent[`zone${z}_x1`]);
+        const y1 = getValS(ent[`zone${z}_y1`]);
+        const x2 = getValS(ent[`zone${z}_x2`]);
+        const y2 = getValS(ent[`zone${z}_y2`]);
+        const zAngle = getValS(ent[`zone${z}_angle`], 0);
+        const zOcc = getStateS(ent[`zone${z}_occupancy`]) === "on";
+        const isExcl = getStateS(ent[`zone${z}_mode`]) === "Exclusion";
         const zEntity = ent[`zone${z}_occupancy`] || "";
 
         if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
@@ -2251,11 +2404,11 @@ class RadarMapCard extends HTMLElement {
           }
         }
       }
-      zonesLayer.innerHTML = zonesHtml;
+      radarSetHtml(zonesLayer, zonesHtml);
     }
 
     const masksLayer = this.shadowRoot.getElementById("masksLayer");
-    if (masksLayer) masksLayer.innerHTML = "";
+    radarSetHtml(masksLayer, "");
 
     // Render Targets & Motion Trails
     const targetsLayer = this.shadowRoot.getElementById("targetsLayer");
@@ -2279,8 +2432,13 @@ class RadarMapCard extends HTMLElement {
         const speedCmS = speedUnit === "mm/s" ? (speed / 10.0) : (speedUnit === "m/s" ? (speed * 100.0) : speed);
         
         // Update Trail
-        this._trails[t].push(pt);
-        if (this._trails[t].length > 12) this._trails[t].shift();
+        // Only extend the trail when the target actually moved
+        const trail = this._trails[t];
+        const lastPt = trail[trail.length - 1];
+        if (!lastPt || Math.abs(lastPt.x - pt.x) > 1 || Math.abs(lastPt.y - pt.y) > 1) {
+          trail.push(pt);
+          if (trail.length > 12) trail.shift();
+        }
 
         // Trail path
         if (this._trails[t].length > 1) {
@@ -2318,8 +2476,8 @@ class RadarMapCard extends HTMLElement {
       }
     }
 
-    if (targetsLayer) targetsLayer.innerHTML = targetsHtml;
-    if (trailsLayer) trailsLayer.innerHTML = trailsHtml;
+    radarSetHtml(targetsLayer, targetsHtml);
+    radarSetHtml(trailsLayer, trailsHtml);
   }
 }
 
@@ -2469,22 +2627,35 @@ class RadarCalibrationCard extends HTMLElement {
       this._selectedDevice = this._config.device;
     }
 
-    if (this._rendered) {
+    if (this._rendered && this._hass) {
+      this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+      this._resetLiveCaches();
       this._renderFull();
     }
+  }
+
+  _resetLiveCaches() {
+    this._watchIds = null;
+    this._lastLiveSig = null;
+    this._lastRoomSig = null;
   }
 
   connectedCallback() {
     this._syncHandler = (e) => {
       if (!this._config.device && e.detail && e.detail.device && e.detail.device !== this._selectedDevice) {
-        this._selectedDevice = e.detail.device;
-        if (this._hass) {
-          this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
-          this._renderFull();
-        }
+        this._switchDevice(e.detail.device, false);
       }
     };
     window.addEventListener("radar-device-selected", this._syncHandler);
+
+    // Re-resolve entity IDs once the HA entity registry arrives / changes
+    this._unsubRegistry = RadarEntityResolver.onRegistryChange(() => {
+      if (!this._hass || !this._rendered || this._emptyState) return;
+      this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+      this._watchIds = null;
+      this._lastLiveSig = null;
+      this._updateLiveValues();
+    });
   }
 
   disconnectedCallback() {
@@ -2492,6 +2663,26 @@ class RadarCalibrationCard extends HTMLElement {
       window.removeEventListener("radar-device-selected", this._syncHandler);
       this._syncHandler = null;
     }
+    if (this._unsubRegistry) {
+      this._unsubRegistry();
+      this._unsubRegistry = null;
+    }
+  }
+
+  _switchDevice(device, broadcast) {
+    this._selectedDevice = device;
+    this._locallyEnabledZones = new Set();
+    this._resetLiveCaches();
+    if (!this._hass) return;
+    this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
+    const sel = this.shadowRoot.getElementById("activeDeviceSelect");
+    if (sel && sel.value !== device) sel.value = device;
+    if (broadcast) {
+      window.dispatchEvent(new CustomEvent("radar-device-selected", { detail: { device } }));
+    }
+    this._initFormStateFromEntities();
+    this._updateViewfinder();
+    this._updateLiveValues();
   }
 
   set hass(hass) {
@@ -2511,11 +2702,31 @@ class RadarCalibrationCard extends HTMLElement {
 
     if (!this._rendered) {
       this._entities = RadarEntityResolver.resolve(hass, { device: this._selectedDevice });
-      this._renderFull();
       this._rendered = true;
-    } else {
-      this._updateLiveValues();
+      this._renderFull();
+      return;
     }
+
+    if (this._emptyState || (this._entities && !hass.states[this._entities.target1_x])) {
+      // Throttled re-discovery so the card enters / leaves the empty state without a page reload
+      const now = Date.now();
+      if (!this._lastDevCheck || now - this._lastDevCheck > 3000) {
+        this._lastDevCheck = now;
+        const devs = RadarEntityResolver.getDevices(hass);
+        if ((devs.length > 0) === Boolean(this._emptyState)) {
+          if (devs.length > 0 && !devs.some(d => d.prefix === this._selectedDevice)) {
+            this._selectedDevice = (this._config && this._config.device) || devs[0].prefix;
+          }
+          this._entities = RadarEntityResolver.resolve(hass, { device: this._selectedDevice });
+          this._resetLiveCaches();
+          this._renderFull();
+          return;
+        }
+      }
+    }
+
+    if (this._emptyState) return;
+    this._updateLiveValues();
   }
 
   _showToast(msg) {
@@ -2532,13 +2743,20 @@ class RadarCalibrationCard extends HTMLElement {
   }
 
   _callService(domain, service, data) {
-    if (!this._hass) return Promise.reject("No HASS instance");
-    return this._hass.callService(domain, service, data);
+    if (!this._hass) return Promise.reject(new Error("No HASS instance"));
+    const p = this._hass.callService(domain, service, data);
+    if (p && p.catch) {
+      p.catch((err) => {
+        console.warn(`[PRESENCE-RADAR-CARDS] ${domain}.${service} failed`, data, err);
+        this._showToast(`⚠️ ${domain}.${service} failed: ${(err && err.message) || "check the sensor is online"}`);
+      });
+    }
+    return p;
   }
 
   _setNumber(entityId, value) {
-    if (!entityId || !this._hass || !this._hass.states[entityId]) return;
-    this._callService("number", "set_value", { entity_id: entityId, value: value });
+    if (!entityId || !this._hass || !this._hass.states[entityId]) return Promise.resolve();
+    return this._callService("number", "set_value", { entity_id: entityId, value: value });
   }
 
   _pressButton(entityId) {
@@ -2568,20 +2786,69 @@ class RadarCalibrationCard extends HTMLElement {
     this._callService("switch", "toggle", { entity_id: entityId });
   }
 
-  _syncZoneEntitiesVisibility(activeCount) {
-    RadarVisibilityManager.clearCache(this._selectedDevice);
-    return RadarVisibilityManager.sync(this._hass, this._entities, this._selectedDevice);
-  }
-
   _initFormStateFromEntities() {
     if (!this._entities || !this._hass) return;
-    RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", this._hass, this._entities, this._selectedDevice, this);
+    const stableHass = radarStableHass(this._hass);
+    RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", stableHass, this._entities, this._selectedDevice, this);
     const ent = this._entities;
-    const states = this._hass.states;
+    const states = stableHass.states;
 
-    // Automatic Entity Visibility Sync in HA (silent background check)
-    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
 
+    this._syncPlacementFromEntities();
+    this._zoneDirty = false;
+    this._lastRenderedZone = null;
+
+    // Populate Tab 3 Engine Inputs
+    const setInp = (id, val) => {
+      const el = this.shadowRoot.getElementById(id);
+      if (el) el.value = val;
+    };
+    setInp("inpMaxDistance", getVal(ent.max_distance, 6000));
+    setInp("inpPresenceTimeout", getVal(ent.presence_timeout, 5));
+    setInp("inpZoneOffDelay", getVal(ent.zone_off_delay, 5));
+    setInp("inpStationaryTimeout", getVal(ent.stationary_latch_timeout, 30));
+    setInp("inpExitMargin", getVal(ent.exit_trajectory_margin, 400));
+
+    const chkStat = this.shadowRoot.getElementById("chkStationaryMemory");
+    if (chkStat) chkStat.checked = (ent.stationary_memory_switch && states[ent.stationary_memory_switch] && states[ent.stationary_memory_switch].state === "on");
+
+    const chkMulti = this.shadowRoot.getElementById("chkMultiTarget");
+    if (chkMulti) chkMulti.checked = (ent.multi_target && states[ent.multi_target] && states[ent.multi_target].state === "on");
+
+    // Hardware Exclusion Mode & Mask Inputs (legacy firmware only)
+    const selExcl = this.shadowRoot.getElementById("selExclusionMode");
+    if (selExcl) {
+      const curMode = (ent.exclusion_mode && states[ent.exclusion_mode]) ? states[ent.exclusion_mode].state : "Disabled";
+      selExcl.value = ["Disabled", "Filter", "Detection"].includes(curMode) ? curMode : "Disabled";
+    }
+    for (let m = 1; m <= 3; m++) {
+      setInp(`inpMask${m}_x1`, getVal(ent[`mask${m}_x1`]));
+      setInp(`inpMask${m}_y1`, getVal(ent[`mask${m}_y1`]));
+      setInp(`inpMask${m}_x2`, getVal(ent[`mask${m}_x2`]));
+      setInp(`inpMask${m}_y2`, getVal(ent[`mask${m}_y2`]));
+    }
+  }
+
+  // Signature of the ESP32's room geometry entities (last-known-good values)
+  _roomSig() {
+    const ent = this._entities || {};
+    const st = radarStableHass(this._hass).states;
+    return [ent.room_width, ent.room_depth, ent.sensor_wall_offset_x, ent.mounting_angle,
+            ent.invert_x_switch, ent.room_min_x, ent.room_max_x, ent.room_max_y]
+      .map(id => (id && st[id]) ? st[id].state : "-").join("|");
+  }
+
+  // Loads Tab 1 (placement & room) from the ESP32. Called on device switch and whenever the
+  // ESP32 values change while the user has no unsaved Tab 1 edits.
+  _syncPlacementFromEntities() {
+    if (!this._entities || !this._hass) return;
+    const ent = this._entities;
+    const states = radarStableHass(this._hass).states;
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
       const v = parseFloat(states[id].state);
@@ -2612,10 +2879,9 @@ class RadarCalibrationCard extends HTMLElement {
       mountingYaw: Math.round(yaw),
       invertX: invX
     };
-    this._zoneDirty = false;
-    this._lastRenderedZone = null;
+    this._lastRoomSig = this._roomSig();
+    this._placementDirty = false;
 
-    // Populate Tab 1 Inputs
     const selPreset = this.shadowRoot.getElementById("selPlacementPreset");
     if (selPreset) selPreset.value = preset;
     const inpW = this.shadowRoot.getElementById("inpRoomWidth");
@@ -2628,40 +2894,11 @@ class RadarCalibrationCard extends HTMLElement {
     if (inpYaw) inpYaw.value = this._formState.mountingYaw;
     const chkInvX = this.shadowRoot.getElementById("chkInvertX");
     if (chkInvX) chkInvX.checked = invX;
-
-    // Populate Tab 4 Engine Inputs
-    const setInp = (id, val) => {
-      const el = this.shadowRoot.getElementById(id);
-      if (el) el.value = val;
-    };
-    setInp("inpMaxDistance", getVal(ent.max_distance, 6000));
-    setInp("inpPresenceTimeout", getVal(ent.presence_timeout, 5));
-    setInp("inpZoneOffDelay", getVal(ent.zone_off_delay, 5));
-    setInp("inpStationaryTimeout", getVal(ent.stationary_latch_timeout, 30));
-    setInp("inpExitMargin", getVal(ent.exit_trajectory_margin, 400));
-
-    const chkStat = this.shadowRoot.getElementById("chkStationaryMemory");
-    if (chkStat) chkStat.checked = (ent.stationary_memory_switch && states[ent.stationary_memory_switch] && states[ent.stationary_memory_switch].state === "on");
-
-    const chkMulti = this.shadowRoot.getElementById("chkMultiTarget");
-    if (chkMulti) chkMulti.checked = (ent.multi_target && states[ent.multi_target] && states[ent.multi_target].state === "on");
-
-    // Populate Tab 3 Hardware Exclusion Mode & Mask Inputs
-    const selExcl = this.shadowRoot.getElementById("selExclusionMode");
-    if (selExcl) {
-      const curMode = (ent.exclusion_mode && states[ent.exclusion_mode]) ? states[ent.exclusion_mode].state : "Disabled";
-      selExcl.value = ["Disabled", "Filter", "Detection"].includes(curMode) ? curMode : "Disabled";
-    }
-    for (let m = 1; m <= 3; m++) {
-      setInp(`inpMask${m}_x1`, getVal(ent[`mask${m}_x1`]));
-      setInp(`inpMask${m}_y1`, getVal(ent[`mask${m}_y1`]));
-      setInp(`inpMask${m}_x2`, getVal(ent[`mask${m}_x2`]));
-      setInp(`inpMask${m}_y2`, getVal(ent[`mask${m}_y2`]));
-    }
   }
 
   _renderFull() {
     const devices = RadarEntityResolver.getDevices(this._hass);
+    this._emptyState = devices.length === 0;
 
     if (devices.length === 0) {
       this.shadowRoot.innerHTML = `
@@ -3599,6 +3836,7 @@ class RadarCalibrationCard extends HTMLElement {
     this._bindEvents();
     this._initFormStateFromEntities();
     this._updateViewfinder();
+    this._lastLiveSig = null;
     this._updateLiveValues();
   }
 
@@ -3611,16 +3849,8 @@ class RadarCalibrationCard extends HTMLElement {
           RadarSetupWizard.open(this.shadowRoot, "calWz");
           return;
         }
-        this._selectedDevice = e.target.value;
-        this._locallyEnabledZones = new Set();
-        this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
-        window.dispatchEvent(new CustomEvent("radar-device-selected", {
-          detail: { device: this._selectedDevice }
-        }));
-        this._initFormStateFromEntities();
-        this._updateViewfinder();
+        this._switchDevice(e.target.value, true);
         this._showToast(`Switched to ${e.target.options[e.target.selectedIndex].text}`);
-        this._updateLiveValues();
         this._renderZoneCardsAndStepper();
       });
     }
@@ -3668,6 +3898,49 @@ class RadarCalibrationCard extends HTMLElement {
         }
       });
     });
+
+    // Zones tab: delegated listeners bound ONCE (the inner markup can be re-rendered freely)
+    const zonesToolbar = this.shadowRoot.getElementById("zonesToolbar");
+    if (zonesToolbar) {
+      zonesToolbar.addEventListener("click", (e) => {
+        const btn = e.target.closest("#btnAddZoneTop");
+        if (!btn || btn.disabled) return;
+        this._addNextZone();
+      });
+    }
+    const zonesGrid = this.shadowRoot.getElementById("zonesCardsGrid");
+    if (zonesGrid) {
+      zonesGrid.addEventListener("click", (e) => {
+        const addFirst = e.target.closest("#btnAddFirstZone");
+        if (addFirst) {
+          if (!addFirst.disabled) this._addNextZone();
+          return;
+        }
+        const dis = e.target.closest(".btn-zone-disable");
+        if (dis) {
+          e.stopPropagation();
+          if (!dis.disabled) this._disableZone(parseInt(dis.dataset.zone, 10));
+          return;
+        }
+        const card = e.target.closest(".zone-card");
+        if (card) {
+          this._selectedZone = parseInt(card.dataset.zone, 10);
+          this._zoneDirty = false;
+          this._setSelect(this._entities.zone_select, `Zone ${this._selectedZone}`);
+          this._renderZoneCardsAndStepper();
+          this._updateViewfinder();
+        }
+      });
+    }
+
+    // Tab 1: remember unsaved edits so live ESP32 updates don't overwrite them
+    const panePlacement = this.shadowRoot.getElementById("tabPlacement");
+    if (panePlacement) {
+      const placementIds = ["selPlacementPreset", "inpRoomWidth", "inpRoomDepth", "inpWallOffsetX", "inpMountingYaw"];
+      ["input", "change"].forEach(evt => panePlacement.addEventListener(evt, (e) => {
+        if (e.target && placementIds.includes(e.target.id)) this._placementDirty = true;
+      }));
+    }
 
     // Placement Preset change: immediately updates formState and redraws SVG viewfinder!
     const selPreset = this.shadowRoot.getElementById("selPlacementPreset");
@@ -3783,6 +4056,7 @@ class RadarCalibrationCard extends HTMLElement {
     const btnFlash = this.shadowRoot.getElementById("btnSaveRoomFlash");
     if (btnFlash) {
       btnFlash.addEventListener("click", () => {
+        this._placementDirty = false;
         const rw = this._formState.roomWidth || 4000;
         const rd = this._formState.roomDepth || 5000;
         const off = this._formState.sensorOffsetX || 0;
@@ -3812,6 +4086,7 @@ class RadarCalibrationCard extends HTMLElement {
     const btnReset = this.shadowRoot.getElementById("btnResetRoomBounds");
     if (btnReset) {
       btnReset.addEventListener("click", () => {
+        this._placementDirty = false;
         this._formState.preset = "center";
         this._formState.sensorOffsetX = 0;
         this._formState.mountingYaw = 0;
@@ -3933,7 +4208,7 @@ class RadarCalibrationCard extends HTMLElement {
     // 2. Update Room Walls
     const vfRoom = this.shadowRoot.getElementById("vfRoomLayer");
     if (vfRoom) {
-      vfRoom.innerHTML = `
+      radarSetHtml(vfRoom, `
         <rect x="0" y="0" width="${rw}" height="${rd}"
               fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="8" rx="6" />
         <text x="${rw / 2}" y="-120" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle">
@@ -3943,17 +4218,17 @@ class RadarCalibrationCard extends HTMLElement {
               transform="rotate(-90, -120, ${rd / 2})">
           ${Math.round(rd)} mm
         </text>
-      `;
+      `);
     }
 
     // 3. Update Sensor Icon & Angled Beam Cone
     const vfBeamCone = this.shadowRoot.getElementById("vfBeamCone");
     const vfSensor = this.shadowRoot.getElementById("vfSensorLayer");
     if (vfBeamCone && vfSensor) {
-      vfSensor.innerHTML = `
+      radarSetHtml(vfSensor, `
         <circle cx="${sx}" cy="${sy}" r="120" fill="#0284c7" stroke="#38bdf8" stroke-width="12" />
         <circle cx="${sx}" cy="${sy}" r="40" fill="#fff" />
-      `;
+      `);
 
       const beamDist = Math.max(rw, rd) * 1.3;
       const radCenter = (((yaw || 0) + 90) * Math.PI) / 180;
@@ -3970,7 +4245,8 @@ class RadarCalibrationCard extends HTMLElement {
     const vfZones = this.shadowRoot.getElementById("vfZonesLayer");
     if (vfZones && this._entities && this._hass) {
       const ent = this._entities;
-      const states = this._hass.states;
+      const stableHass = radarStableHass(this._hass);
+      const states = stableHass.states;
       const getVal = (id, def = 0) => {
         if (!id || !states[id]) return def;
         const v = parseFloat(states[id].state);
@@ -3978,7 +4254,7 @@ class RadarCalibrationCard extends HTMLElement {
       };
       const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
-      const activeZonesList = RadarEntityResolver.getActiveZones(this._hass, ent);
+      const activeZonesList = RadarEntityResolver.getActiveZones(stableHass, ent, this._locallyEnabledZones);
       let zHtml = "";
       for (const z of activeZonesList) {
         let x1 = getVal(ent[`zone${z}_x1`]);
@@ -4044,11 +4320,11 @@ class RadarCalibrationCard extends HTMLElement {
           }
         }
       }
-      vfZones.innerHTML = zHtml;
+      radarSetHtml(vfZones, zHtml);
     }
 
     const vfMasks = this.shadowRoot.getElementById("vfMasksLayer");
-    if (vfMasks) vfMasks.innerHTML = "";
+    radarSetHtml(vfMasks, "");
 
     // 5. Update Targets
     this._updateVfTargets(previewGeom);
@@ -4061,9 +4337,6 @@ class RadarCalibrationCard extends HTMLElement {
 
     const ent = this._entities;
     const states = this._hass.states;
-
-    // Automatic Entity Visibility Sync in HA (silent background check)
-    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
 
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
@@ -4090,10 +4363,28 @@ class RadarCalibrationCard extends HTMLElement {
         `;
       }
     }
-    vfTargets.innerHTML = tHtml;
+    radarSetHtml(vfTargets, tHtml);
   }
 
-  // Only updates live status badges & live telemetry — NEVER overwrites active user typing!
+  // Signature of this device's entity states + local UI state. Unrelated hass updates are ignored.
+  _computeLiveSig() {
+    const ent = this._entities || {};
+    if (!this._watchIds) {
+      this._watchIds = Object.values(ent).filter(v => typeof v === "string" && v.indexOf(".") > 0);
+    }
+    const states = this._hass.states;
+    let sig = [
+      RadarEntityResolver._registryVersion, this._activeTab, this._selectedZone,
+      this._zonePending ? 1 : 0, Array.from(this._locallyEnabledZones || []).join(",")
+    ].join("|") + "|";
+    for (const id of this._watchIds) {
+      const s = states[id];
+      sig += (s ? s.state : "-") + "|";
+    }
+    return sig;
+  }
+
+  // Only updates live status badges & live telemetry - NEVER overwrites active user typing!
   _updateLiveValues() {
     if (!this._hass || !this.shadowRoot) return;
     if (!this._entities) {
@@ -4103,14 +4394,22 @@ class RadarCalibrationCard extends HTMLElement {
     // If device switched, re-init formState
     if (this._formState.device !== this._selectedDevice) {
       this._initFormStateFromEntities();
-      this._updateViewfinder();
+      this._lastLiveSig = null;
     }
+
+    const sig = this._computeLiveSig();
+    if (sig === this._lastLiveSig) return;
+    this._lastLiveSig = sig;
 
     const ent = this._entities;
     const states = this._hass.states;
+    const stableHass = radarStableHass(this._hass);
+    RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", stableHass, ent, this._selectedDevice, this);
 
-    // Automatic Entity Visibility Sync in HA (silent background check)
-    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+    // Pick up room geometry changes from the ESP32 (or values that arrived after a reconnect)
+    if (!this._placementDirty && this._roomSig() !== this._lastRoomSig) {
+      this._syncPlacementFromEntities();
+    }
 
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
@@ -4118,6 +4417,8 @@ class RadarCalibrationCard extends HTMLElement {
       return Number.isFinite(v) ? v : def;
     };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+    const t1State = states[ent.target1_x];
+    const isOffline = !t1State || t1State.state === "unavailable";
 
     // Header Chips
     const occ = getState(ent.occupancy, "off") === "on";
@@ -4149,59 +4450,77 @@ class RadarCalibrationCard extends HTMLElement {
     const wifi = states[ent.wifi_signal] ? states[ent.wifi_signal].state : "--";
     const chipWifi = this.shadowRoot.getElementById("chipCalWifi");
     if (chipWifi) {
-      chipWifi.textContent = `📶 ${wifi} dBm`;
+      chipWifi.textContent = isOffline ? "⏳ Reconnecting…" : `📶 ${wifi} dBm`;
       chipWifi.dataset.entity = ent.wifi_signal || "";
       chipWifi.title = ent.wifi_signal ? `Click to view history (${ent.wifi_signal})` : "Wi-Fi Signal";
     }
 
-    // Viewfinder is visible on ALL tabs! Update targets & zone occupancy highlights on all tabs:
-    const rw = Math.max(1000, this._formState.roomWidth || 4000);
-    const rd = Math.max(1000, this._formState.roomDepth || 5000);
-    const off = this._formState.sensorOffsetX || 0;
-    const yaw = this._formState.mountingYaw || 0;
-    const previewGeom = {
-      hasRoom: true,
-      roomWidth: rw,
-      roomDepth: rd,
-      sx: (rw / 2) + off,
-      sy: 0,
-      angle: yaw,
-      sensorOffsetX: off,
-      invertX: Boolean(this._formState.invertX)
-    };
-    this._updateVfTargets(previewGeom);
+    // Viewfinder is visible on ALL tabs: refresh zones (occupancy colours, captures) + targets.
+    // DOM is only touched when the generated markup changes.
+    this._updateViewfinder();
 
     if (this._activeTab === "zones") {
       this._renderZoneCardsAndStepper();
     }
   }
 
+  _addNextZone() {
+    if (this._zonePending || !this._entities || !this._hass) return;
+    const activeList = RadarEntityResolver.getActiveZones(radarStableHass(this._hass), this._entities, this._locallyEnabledZones);
+    const nextZ = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].find(n => !activeList.includes(n));
+    if (nextZ) this._enableZone(nextZ);
+  }
+
   async _enableZone(z) {
-    if (!this._entities || !this._hass) return;
-    if (!this._locallyEnabledZones) this._locallyEnabledZones = new Set();
-    this._locallyEnabledZones.add(z);
-    await RadarVisibilityManager.enableZone(this._hass, this._entities, z);
-    this._selectedZone = z;
-    this._setSelect(this._entities.zone_select, `Zone ${z}`);
-    this._showToast(`Zone ${z} enabled. Configure coordinates below.`);
+    if (this._zonePending || !this._entities || !this._hass) return;
+    this._zonePending = true;
     this._renderZoneCardsAndStepper();
-    this._updateViewfinder();
+    try {
+      const res = await RadarVisibilityManager.enableZone(this._hass, this._entities, z);
+      if (res.reason === "admin") {
+        this._showToast("⚠️ Only Home Assistant administrators can enable zone entities.");
+        return;
+      }
+      if (!res.okCount) {
+        this._showToast(`⚠️ Could not enable Zone ${z} entities in Home Assistant (see browser console).`);
+        return;
+      }
+      if (!this._locallyEnabledZones) this._locallyEnabledZones = new Set();
+      this._locallyEnabledZones.add(z);
+      this._selectedZone = z;
+      this._setSelect(this._entities.zone_select, `Zone ${z}`);
+      this._showToast(res.ok
+        ? `Zone ${z} enabled. Entities go live in a few seconds - configure coordinates below.`
+        : `Zone ${z} partly enabled (${res.okCount}/${res.total} entities). See browser console.`);
+    } finally {
+      this._zonePending = false;
+      this._renderZoneCardsAndStepper();
+      this._updateViewfinder();
+    }
   }
 
   async _disableZone(z) {
-    if (!this._entities || !this._hass) return;
+    if (this._zonePending || !this._entities || !this._hass) return;
     const ent = this._entities;
-    if (confirm(`Disable Zone ${z}? Its coordinates will be reset to 0 and entities will be disabled in Home Assistant.`)) {
+    if (!confirm(`Disable Zone ${z}? Its coordinates will be reset to 0 and entities will be disabled in Home Assistant.`)) return;
+    this._zonePending = true;
+    this._renderZoneCardsAndStepper();
+    try {
+      // Clear coordinates on the ESP32 first, then disable the entities
+      await Promise.allSettled(["x1", "y1", "x2", "y2", "angle"].map(k => this._setNumber(ent[`zone${z}_${k}`], 0)));
+      const res = await RadarVisibilityManager.disableZone(this._hass, ent, z);
       if (this._locallyEnabledZones) this._locallyEnabledZones.delete(z);
-      this._setNumber(ent[`zone${z}_x1`], 0);
-      this._setNumber(ent[`zone${z}_y1`], 0);
-      this._setNumber(ent[`zone${z}_x2`], 0);
-      this._setNumber(ent[`zone${z}_y2`], 0);
-      this._setNumber(ent[`zone${z}_angle`], 0);
-      await RadarVisibilityManager.disableZone(this._hass, this._entities, z);
-      this._showToast(`Zone ${z} disabled and coordinates cleared.`);
-      const remaining = RadarEntityResolver.getActiveZones(this._hass, this._entities, this._locallyEnabledZones).filter(n => n !== z);
+      if (res.reason === "admin") {
+        this._showToast("⚠️ Only Home Assistant administrators can disable zone entities.");
+      } else if (!res.okCount) {
+        this._showToast(`⚠️ Could not disable Zone ${z} entities in Home Assistant (see browser console).`);
+      } else {
+        this._showToast(`Zone ${z} disabled and coordinates cleared.`);
+      }
+      const remaining = RadarEntityResolver.getActiveZones(radarStableHass(this._hass), ent, this._locallyEnabledZones).filter(n => n !== z);
       this._selectedZone = remaining.length > 0 ? remaining[0] : 1;
+    } finally {
+      this._zonePending = false;
       this._renderZoneCardsAndStepper();
       this._updateViewfinder();
     }
@@ -4209,14 +4528,14 @@ class RadarCalibrationCard extends HTMLElement {
 
   _renderZoneCardsAndStepper() {
     const grid = this.shadowRoot.getElementById("zonesCardsGrid");
-    if (!grid) return;
+    if (!grid || !this._hass || !this._entities) return;
 
     const ent = this._entities;
-    const states = this._hass.states;
+    const stableHass = radarStableHass(this._hass);
+    const states = stableHass.states;       // zone values: last-known-good (survive reloads)
+    const liveStates = this._hass.states;   // live telemetry (targets, calibration status)
 
     if (!this._locallyEnabledZones) this._locallyEnabledZones = new Set();
-    // Automatic Entity Visibility Sync in HA (silent background check)
-    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice, this._locallyEnabledZones);
 
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
@@ -4224,52 +4543,48 @@ class RadarCalibrationCard extends HTMLElement {
       return Number.isFinite(v) ? v : def;
     };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
+    const getLive = (id, def = 0) => {
+      if (!id || !liveStates[id]) return def;
+      const v = parseFloat(liveStates[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
 
-    const activeList = RadarEntityResolver.getActiveZones(this._hass, ent, this._locallyEnabledZones);
+    const activeList = RadarEntityResolver.getActiveZones(stableHass, ent, this._locallyEnabledZones);
+    const pending = Boolean(this._zonePending);
 
     const toolbar = this.shadowRoot.getElementById("zonesToolbar");
     if (toolbar) {
-      toolbar.innerHTML = `
+      radarSetHtml(toolbar, `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px; flex-wrap:wrap; padding: 2px 2px;">
           <div style="display:flex; align-items:center; gap:8px;">
             <span style="font-weight:700; font-size:0.92rem;">Zones: <span style="color:var(--primary-color);">${activeList.length} / 10</span></span>
             ${activeList.length === 0 ? `<span style="font-size:0.75rem; color:var(--text-muted);">(None active)</span>` : ""}
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
-            ${activeList.length < 10 ? `<button class="btn-primary" id="btnAddZoneTop" style="padding:6px 14px; font-size:0.82rem;">➕ Add Zone</button>` : `<span style="font-size:0.78rem; color:var(--text-muted); padding:6px 0;">Max 10 zones</span>`}
+            ${activeList.length < 10
+              ? `<button class="btn-primary" id="btnAddZoneTop" ${pending ? "disabled" : ""} style="padding:6px 14px; font-size:0.82rem;${pending ? " opacity:0.6; cursor:wait;" : ""}">${pending ? "⏳ Working…" : "➕ Add Zone"}</button>`
+              : `<span style="font-size:0.78rem; color:var(--text-muted); padding:6px 0;">Max 10 zones</span>`}
           </div>
         </div>
-      `;
-      const btnAdd = toolbar.querySelector("#btnAddZoneTop");
-      if (btnAdd) {
-        btnAdd.addEventListener("click", () => {
-          const nextZ = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].find(n => !activeList.includes(n));
-          if (nextZ) {
-            this._enableZone(nextZ);
-          }
-        });
-      }
+      `);
     }
 
     const stepperBox = this.shadowRoot.getElementById("zoneStepperBox");
     if (activeList.length === 0) {
-      grid.innerHTML = `
+      radarSetHtml(grid, `
         <div style="grid-column: 1 / -1; padding: 32px 16px; text-align: center; background: rgba(255,255,255,0.02); border: 1px dashed var(--border-color); border-radius: 12px;">
           <div style="font-size: 2.2rem; margin-bottom: 8px;">🎯</div>
           <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px;">No Active Zones</div>
           <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px; max-width: 360px; margin-left: auto; margin-right: auto;">
             Software zones allow you to define custom detection areas (beds, desks) or exclusion masks to ignore ceiling fans and pets.
           </div>
-          <button class="btn-primary" id="btnAddFirstZone" style="padding: 9px 20px; font-size: 0.88rem;">➕ Add Zone 1</button>
+          <button class="btn-primary" id="btnAddFirstZone" ${pending ? "disabled" : ""} style="padding: 9px 20px; font-size: 0.88rem;${pending ? " opacity:0.6; cursor:wait;" : ""}">${pending ? "⏳ Working…" : "➕ Add Zone 1"}</button>
         </div>
-      `;
-      const btnFirst = grid.querySelector("#btnAddFirstZone");
-      if (btnFirst) {
-        btnFirst.addEventListener("click", () => this._enableZone(1));
-      }
+      `);
       if (stepperBox) {
         stepperBox.style.display = "none";
       }
+      this._lastRenderedZone = null;
       return;
     }
 
@@ -4304,7 +4619,7 @@ class RadarCalibrationCard extends HTMLElement {
               <div class="zone-status-badge ${isExcl ? "exclusion" : ""} ${isOcc ? "occupied" : ""}">
                 ${isExcl ? (isOcc ? "⚠️ MASKED" : "MASK") : (isOcc ? "OCCUPIED" : (isConfigured ? "ACTIVE" : "EMPTY"))}
               </div>
-              <button class="btn-zone-disable" data-zone="${z}" style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:0.85rem; padding:2px 4px; border-radius:4px;" title="Disable Zone ${z} and remove from Home Assistant">🗑️</button>
+              <button class="btn-zone-disable" data-zone="${z}" ${pending ? "disabled" : ""} style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:0.85rem; padding:2px 4px; border-radius:4px;" title="Disable Zone ${z} and remove from Home Assistant">🗑️</button>
             </div>
           </div>
           <div class="zone-coords-info">
@@ -4320,25 +4635,7 @@ class RadarCalibrationCard extends HTMLElement {
         </div>
       `;
     }
-    grid.innerHTML = cardsHtml;
-
-    grid.querySelectorAll(".zone-card").forEach(c => {
-      c.addEventListener("click", () => {
-        this._selectedZone = parseInt(c.dataset.zone, 10);
-        this._zoneDirty = false;
-        this._setSelect(ent.zone_select, `Zone ${this._selectedZone}`);
-        this._renderZoneCardsAndStepper();
-        this._updateViewfinder();
-      });
-    });
-
-    grid.querySelectorAll(".btn-zone-disable").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const z = parseInt(btn.dataset.zone, 10);
-        this._disableZone(z);
-      });
-    });
+    radarSetHtml(grid, cardsHtml);
 
     const curZ = this._selectedZone;
     const x1 = getVal(ent[`zone${curZ}_x1`]);
@@ -4349,15 +4646,15 @@ class RadarCalibrationCard extends HTMLElement {
     const isOcc = getState(ent[`zone${curZ}_occupancy`]) === "on";
     const isExcl = getState(ent[`zone${curZ}_mode`]) === "Exclusion";
 
-    const t1Dist = getVal(ent.target1_distance, 0);
-    const t1RawX = getVal(ent.target1_x, NaN);
-    const t1RawY = getVal(ent.target1_y, NaN);
+    const t1Dist = getLive(ent.target1_distance, 0);
+    const t1RawX = getLive(ent.target1_x, NaN);
+    const t1RawY = getLive(ent.target1_y, NaN);
     const hasT1 = Number.isFinite(t1RawX) && Number.isFinite(t1RawY) && t1Dist > 0;
     const t1Aligned = hasT1
       ? RoomGeometry.rotateToRoomAligned(t1RawX, t1RawY, this._formState.mountingYaw || 0, Boolean(this._formState.invertX))
       : { x: 0, y: 0 };
 
-    const rawCalStatus = (ent.zone_status && states[ent.zone_status]) ? states[ent.zone_status].state : "";
+    const rawCalStatus = (ent.zone_status && liveStates[ent.zone_status]) ? liveStates[ent.zone_status].state : "";
     const calStatusMsg = (rawCalStatus && rawCalStatus !== "unknown" && rawCalStatus !== "unavailable") ? rawCalStatus : "";
 
     const stepPill = this.shadowRoot.getElementById("stepPill");
@@ -4369,10 +4666,10 @@ class RadarCalibrationCard extends HTMLElement {
 
     stepPill.textContent = `Zone ${curZ}`;
     stepTitle.textContent = `Zone ${curZ} Calibration & Manual Coordinates`;
-    stepInstr.innerHTML = `
+    radarSetHtml(stepInstr, `
       <div>Live Target Lock (Room-Aligned): <b>${hasT1 ? `Target 1 at X:${Math.round(t1Aligned.x)} Y:${Math.round(t1Aligned.y)} mm (${Math.round(t1Dist)}mm)` : "No targets in room — walk in to calibrate"}</b></div>
       ${calStatusMsg ? `<div style="margin-top:6px; padding:6px 10px; border-radius:6px; background:rgba(56, 189, 248, 0.12); border:1px solid rgba(56, 189, 248, 0.3); color:#bae6fd; font-size:0.8rem;">📡 ${calStatusMsg}</div>` : ""}
-    `;
+    `);
 
     // Only re-build stepContent if zone selection changed to avoid interrupting manual input typing
     if (this._lastRenderedZone !== curZ) {
@@ -4474,12 +4771,8 @@ class RadarCalibrationCard extends HTMLElement {
           const curState = (this._hass && this._hass.states[modeEntity]) ? this._hass.states[modeEntity].state : (isExcl ? "Exclusion" : "Detection");
           const newMode = (curState === "Exclusion") ? "Detection" : "Exclusion";
           this._setSelect(modeEntity, newMode);
+          // The button/description update non-destructively when HA reports the new state
           this._showToast(`Zone ${curZ} mode set to ${newMode}.`);
-          this._lastRenderedZone = null;
-          setTimeout(() => {
-            this._renderZoneCardsAndStepper();
-            this._updateViewfinder();
-          }, 150);
         });
       }
 
@@ -4578,7 +4871,7 @@ class RadarCalibrationCard extends HTMLElement {
             const currentVal = parseFloat(input.value) || 0;
             const newVal = currentVal + delta;
             input.value = newVal;
-            this._zoneDirty = true;
+            // Nudges are written to the ESP32 immediately, so they don't count as unsaved edits
             const entityId = ent[`zone${curZ}_${coord}`];
             this._setNumber(entityId, newVal);
             this._updateViewfinder();
@@ -4653,4 +4946,4 @@ defineElement("radar-calibration-card-editor", RadarCalibrationCardEditor);
 defineElement("radar-calibration-card", RadarCalibrationCard);
 defineElement("presence-calibration-card", class extends RadarCalibrationCard {});
 
-console.log("[PRESENCE-RADAR-CARDS] v1.7.5 High-Precision mmWave Radar Suite initialized.");
+console.log(`[PRESENCE-RADAR-CARDS] v${CARD_VERSION} High-Precision mmWave Radar Suite initialized.`);
