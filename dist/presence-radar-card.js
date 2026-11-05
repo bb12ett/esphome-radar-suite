@@ -809,6 +809,56 @@ class RadarUpdateManager {
     if (device) this._dismissed.add(device);
   }
 
+  static getEspHomePath(hass) {
+    if (hass && hass.panels) {
+      for (const [key, panel] of Object.entries(hass.panels)) {
+        const pKey = (key || "").toLowerCase();
+        const pTitle = ((panel && panel.title) || "").toLowerCase();
+        const pUrl = (panel && panel.url_path) || key;
+        const pComp = ((panel && panel.component_name) || "").toLowerCase();
+        const addon = ((panel && panel.config && panel.config.addon) || "").toLowerCase();
+
+        if (
+          pKey.includes("esphome") ||
+          pTitle.includes("esphome") ||
+          pComp.includes("esphome") ||
+          addon.includes("esphome")
+        ) {
+          return `/${pUrl}`;
+        }
+      }
+    }
+    // Default Supervisor ESPHome add-on panel slug
+    return "/5c53de3b_esphome";
+  }
+
+  static navigateTo(element, path) {
+    if (!path) return;
+
+    // 1. Standard Home Assistant SPA router navigation event
+    try {
+      window.history.pushState(null, "", path);
+      const event = new CustomEvent("location-changed", {
+        bubbles: true,
+        composed: true,
+        detail: { replace: false }
+      });
+      if (element && element.dispatchEvent) {
+        element.dispatchEvent(event);
+      }
+      window.dispatchEvent(event);
+    } catch (err) {
+      console.warn("HA location-changed event navigation failed:", err);
+    }
+
+    // 2. Fallback check: if pathname didn't change after 120ms (e.g. standalone iframe), assign window.location
+    setTimeout(() => {
+      if (!window.location.pathname.startsWith(path)) {
+        window.location.assign(path);
+      }
+    }, 120);
+  }
+
   static checkStatus(hass, entities, devicePrefix) {
     if (!hass || !entities) return { hasAlert: false };
     if (devicePrefix && this.isDismissed(devicePrefix)) return { hasAlert: false };
@@ -882,9 +932,10 @@ class RadarUpdateManager {
     return { hasAlert: false };
   }
 
-  static renderBannerHtml(status, idPrefix) {
+  static renderBannerHtml(status, idPrefix, hass = null) {
     if (!status || !status.hasAlert) return "";
     const isBreaking = status.isBreaking;
+    const espPath = this.getEspHomePath(hass);
     return `
       <div id="${idPrefix}UpdateBanner" class="radar-update-banner ${isBreaking ? 'breaking' : 'available'}">
         <div class="radar-update-banner-header">
@@ -904,9 +955,9 @@ class RadarUpdateManager {
           <button id="${idPrefix}BtnTriggerUpdate" class="btn-update-primary">
             🚀 ${status.updateEntity ? 'Update Firmware in HA' : 'Open ESPHome Dashboard'}
           </button>
-          <button id="${idPrefix}BtnOpenDashboard" class="btn-update-secondary">
+          <a id="${idPrefix}BtnOpenDashboard" href="${espPath}" class="btn-update-secondary" style="text-decoration:none; cursor:pointer;">
             🛠️ ESPHome Dashboard
-          </button>
+          </a>
           <button id="${idPrefix}BtnViewGuide" class="btn-update-link">
             📋 YAML Setup Guide
           </button>
@@ -931,20 +982,28 @@ class RadarUpdateManager {
 
     const btnUpdate = shadowRoot.getElementById(`${idPrefix}BtnTriggerUpdate`);
     if (btnUpdate) {
-      btnUpdate.addEventListener("click", () => {
+      btnUpdate.addEventListener("click", (e) => {
         const status = this.checkStatus(cardInstance._hass, cardInstance._entities, devicePrefix);
         if (status && status.updateEntity && cardInstance._hass.states[status.updateEntity]) {
           cardInstance._openMoreInfo(status.updateEntity);
         } else {
-          window.open("/esphome_dashboard", "_blank");
+          if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+            e.preventDefault();
+            const espPath = this.getEspHomePath(cardInstance._hass);
+            this.navigateTo(btnUpdate, espPath);
+          }
         }
       });
     }
 
     const btnDashboard = shadowRoot.getElementById(`${idPrefix}BtnOpenDashboard`);
     if (btnDashboard) {
-      btnDashboard.addEventListener("click", () => {
-        window.open("/esphome_dashboard", "_blank");
+      btnDashboard.addEventListener("click", (e) => {
+        if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+          e.preventDefault();
+          const espPath = this.getEspHomePath(cardInstance._hass);
+          this.navigateTo(btnDashboard, espPath);
+        }
       });
     }
 
@@ -971,7 +1030,7 @@ class RadarUpdateManager {
     if (container.dataset.statusKey === statusKey) return;
     container.dataset.statusKey = statusKey;
 
-    container.innerHTML = this.renderBannerHtml(status, idPrefix);
+    container.innerHTML = this.renderBannerHtml(status, idPrefix, hass);
     if (status.hasAlert) {
       this.attachEvents(shadowRoot, idPrefix, devicePrefix, cardInstance);
     }
@@ -1013,7 +1072,8 @@ packages:
 `;
   }
 
-  static renderModalHtml(idPrefix = "wz") {
+  static renderModalHtml(idPrefix = "wz", hass = null) {
+    const espPath = RadarUpdateManager.getEspHomePath(hass);
     return `
       <div id="${idPrefix}ModalOverlay" class="radar-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:16px; box-sizing:border-box;">
         <div class="radar-modal-dialog" style="background:var(--card-bg, #0f172a); border:1px solid var(--border-color, rgba(255,255,255,0.15)); border-radius:16px; width:100%; max-width:540px; max-height:92vh; overflow-y:auto; padding:22px; box-shadow:0 20px 50px rgba(0,0,0,0.6); box-sizing:border-box; color:var(--text-color, #f8fafc); font-family:inherit; text-align:left;">
@@ -1076,7 +1136,7 @@ packages:
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-            <a href="/esphome_dashboard" target="_blank" class="btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; padding:9px 16px; font-size:0.85rem;">
+            <a id="${idPrefix}BtnOpenDashboard" href="${espPath}" class="btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; padding:9px 16px; font-size:0.85rem; cursor:pointer;">
               🚀 Open ESPHome Dashboard
             </a>
             <button id="${idPrefix}BtnDone" class="btn-secondary" style="padding:9px 16px; font-size:0.85rem; cursor:pointer;">
@@ -1089,7 +1149,7 @@ packages:
     `;
   }
 
-  static attachEvents(shadowRoot, idPrefix, onToast) {
+  static attachEvents(shadowRoot, idPrefix, onToast, cardInstance = null) {
     const overlay = shadowRoot.getElementById(`${idPrefix}ModalOverlay`);
     if (!overlay) return;
 
@@ -1145,6 +1205,18 @@ packages:
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) hide();
     });
+
+    const btnOpenDash = shadowRoot.getElementById(`${idPrefix}BtnOpenDashboard`);
+    if (btnOpenDash) {
+      btnOpenDash.addEventListener("click", (e) => {
+        if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+          e.preventDefault();
+          const espPath = RadarUpdateManager.getEspHomePath(cardInstance?._hass || window.hass);
+          hide();
+          RadarUpdateManager.navigateTo(btnOpenDash, espPath);
+        }
+      });
+    }
   }
 
   static open(shadowRoot, idPrefix, friendlyName = "") {
@@ -1301,10 +1373,10 @@ class RadarMapCard extends HTMLElement {
           <button class="btn-primary" id="btnMapEmptySetup">
             ⚡ Quick Setup Guide & YAML Generator
           </button>
-          ${RadarSetupWizard.renderModalHtml("mapWz")}
+          ${RadarSetupWizard.renderModalHtml("mapWz", this._hass)}
         </ha-card>
       `;
-      RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz");
+      RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz", null, this);
       const btn = this.shadowRoot.getElementById("btnMapEmptySetup");
       if (btn) btn.addEventListener("click", () => RadarSetupWizard.open(this.shadowRoot, "mapWz"));
       return;
@@ -1756,7 +1828,7 @@ class RadarMapCard extends HTMLElement {
         </div>
 
         <div id="mapUpdUpdateBannerContainer" class="radar-update-container">
-          ${RadarUpdateManager.renderBannerHtml(updateStatus, "mapUpd")}
+          ${RadarUpdateManager.renderBannerHtml(updateStatus, "mapUpd", this._hass)}
         </div>
 
         <div class="map-viewport">
@@ -1817,11 +1889,11 @@ class RadarMapCard extends HTMLElement {
           <div class="zone-pill" id="pillZ3">Zone 3</div>
           <div class="zone-pill" id="pillZ4">Zone 4</div>
         </div>
-        ${RadarSetupWizard.renderModalHtml("mapWz")}
+        ${RadarSetupWizard.renderModalHtml("mapWz", this._hass)}
       </ha-card>
     `;
 
-    RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz");
+    RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz", null, this);
     RadarUpdateManager.attachEvents(this.shadowRoot, "mapUpd", this._selectedDevice, this);
 
     const selectEl = this.shadowRoot.getElementById("mapDeviceSelect");
@@ -1884,12 +1956,14 @@ class RadarMapCard extends HTMLElement {
 
   _openMoreInfo(entityId) {
     if (!entityId) return;
-    this.dispatchEvent(new CustomEvent("hass-more-info", {
+    const event = new CustomEvent("hass-more-info", {
       bubbles: true,
       composed: true,
       cancelable: true,
       detail: { entityId }
-    }));
+    });
+    this.dispatchEvent(event);
+    window.dispatchEvent(event);
   }
 
   _update() {
@@ -2380,12 +2454,14 @@ class RadarCalibrationCard extends HTMLElement {
 
   _openMoreInfo(entityId) {
     if (!entityId) return;
-    this.dispatchEvent(new CustomEvent("hass-more-info", {
+    const event = new CustomEvent("hass-more-info", {
       bubbles: true,
       composed: true,
       cancelable: true,
       detail: { entityId }
-    }));
+    });
+    this.dispatchEvent(event);
+    window.dispatchEvent(event);
   }
 
   _setSelect(entityId, option) {
@@ -2542,10 +2618,10 @@ class RadarCalibrationCard extends HTMLElement {
           <button class="btn-primary" id="btnEmptySetupGuide">
             ⚡ Quick Setup Guide & YAML Generator
           </button>
-          ${RadarSetupWizard.renderModalHtml("calWz")}
+          ${RadarSetupWizard.renderModalHtml("calWz", this._hass)}
         </ha-card>
       `;
-      RadarSetupWizard.attachEvents(this.shadowRoot, "calWz");
+      RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", null, this);
       const btn = this.shadowRoot.getElementById("btnEmptySetupGuide");
       if (btn) btn.addEventListener("click", () => RadarSetupWizard.open(this.shadowRoot, "calWz"));
       return;
@@ -3215,7 +3291,7 @@ class RadarCalibrationCard extends HTMLElement {
         <div class="toast-banner" id="toastBanner"></div>
 
         <div id="calUpdUpdateBannerContainer" class="radar-update-container">
-          ${RadarUpdateManager.renderBannerHtml(updateStatus, "calUpd")}
+          ${RadarUpdateManager.renderBannerHtml(updateStatus, "calUpd", this._hass)}
         </div>
 
         <!-- Interactive Live Viewfinder SVG (Visible on ALL tabs!) -->
@@ -3400,11 +3476,11 @@ class RadarCalibrationCard extends HTMLElement {
             <button class="btn-danger" id="btnFactoryResetRadar" title="Factory Reset LD2450">⚠️ Factory Reset Radar</button>
           </div>
         </div>
-        ${RadarSetupWizard.renderModalHtml("calWz")}
+        ${RadarSetupWizard.renderModalHtml("calWz", this._hass)}
       </ha-card>
     `;
 
-    RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", (msg) => this._showToast(msg));
+    RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", (msg) => this._showToast(msg), this);
     RadarUpdateManager.attachEvents(this.shadowRoot, "calUpd", this._selectedDevice, this);
 
     this._bindEvents();
