@@ -1076,7 +1076,7 @@ packages:
     const espPath = RadarUpdateManager.getEspHomePath(hass);
     return `
       <div id="${idPrefix}ModalOverlay" class="radar-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; backdrop-filter:blur(4px); align-items:center; justify-content:center; padding:16px; box-sizing:border-box;">
-        <div class="radar-modal-dialog" style="background:var(--card-bg, #0f172a); border:1px solid var(--border-color, rgba(255,255,255,0.15)); border-radius:16px; width:100%; max-width:540px; max-height:92vh; overflow-y:auto; padding:22px; box-shadow:0 20px 50px rgba(0,0,0,0.6); box-sizing:border-box; color:var(--text-color, #f8fafc); font-family:inherit; text-align:left;">
+        <div class="radar-modal-dialog" style="background:var(--card-bg, #0f172a); border:1px solid var(--border-color, rgba(255,255,255,0.15)); border-radius:16px; width:100%; max-width:540px; max-height:92vh; overflow-y:auto; padding:22px; box-shadow:0 20px 50px rgba(0,0,0,0.6); box-sizing:border-box; color:var(--text-color, #f8fafc); font-family:inherit; text-align:left; color-scheme:dark;">
           
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
             <div>
@@ -1101,10 +1101,10 @@ packages:
             </div>
             <div>
               <label style="display:block; font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Board Model</label>
-              <select id="${idPrefix}SelBoard" class="form-select" style="width:100%; box-sizing:border-box;">
-                <option value="esp32-c3-devkitm-1" selected>ESP32-C3 SuperMini (Recommended)</option>
-                <option value="esp32dev">Standard ESP32 (esp32dev)</option>
-                <option value="d1_mini32">D1 Mini ESP32 (d1_mini32)</option>
+              <select id="${idPrefix}SelBoard" class="form-select" style="width:100%; box-sizing:border-box; color-scheme:dark; background:#1e293b; color:#f8fafc; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px 12px; outline:none;">
+                <option value="esp32-c3-devkitm-1" style="background:#1e293b; color:#f8fafc;" selected>ESP32-C3 SuperMini (Recommended)</option>
+                <option value="esp32dev" style="background:#1e293b; color:#f8fafc;">Standard ESP32 (esp32dev)</option>
+                <option value="d1_mini32" style="background:#1e293b; color:#f8fafc;">D1 Mini ESP32 (d1_mini32)</option>
               </select>
             </div>
             <div>
@@ -1330,6 +1330,7 @@ class RadarMapCard extends HTMLElement {
           :host {
             display: block;
             font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+            color-scheme: dark;
             --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
             --primary-color: #38bdf8;
             --text-color: var(--primary-text-color, #f8fafc);
@@ -1340,7 +1341,7 @@ class RadarMapCard extends HTMLElement {
             background: var(--card-bg);
             border-radius: 16px;
             border: 1px solid var(--border-color);
-            padding: 34px 18px;
+            padding: 36px 20px;
             color: var(--text-color);
             text-align: center;
           }
@@ -1348,9 +1349,9 @@ class RadarMapCard extends HTMLElement {
             background: var(--primary-color);
             color: #0f172a;
             border: none;
-            padding: 10px 20px;
+            padding: 10px 22px;
             border-radius: 8px;
-            font-size: 0.88rem;
+            font-size: 0.9rem;
             font-weight: 700;
             cursor: pointer;
             display: inline-flex;
@@ -1365,10 +1366,10 @@ class RadarMapCard extends HTMLElement {
           }
         </style>
         <ha-card>
-          <div style="font-size: 2.8rem; margin-bottom: 12px;">🎯</div>
-          <div style="font-size: 1.2rem; font-weight: 700; margin-bottom: 6px;">No Presence Sensors Found</div>
-          <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 400px; margin: 0 auto 20px; line-height: 1.5;">
-            No mmWave radar presence sensors detected. Add a sensor using ESPHome to see live room tracking and detection zones here.
+          <div style="font-size: 3rem; margin-bottom: 12px;">📡</div>
+          <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px;">No Presence Sensors Found</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 420px; margin: 0 auto 20px; line-height: 1.5;">
+            No HLK-LD2450 radar sensors were detected in Home Assistant yet. Use our 1-minute setup wizard to configure and add your first sensor.
           </div>
           <button class="btn-primary" id="btnMapEmptySetup">
             ⚡ Quick Setup Guide & YAML Generator
@@ -1391,6 +1392,7 @@ class RadarMapCard extends HTMLElement {
         :host {
           display: block;
           font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+          color-scheme: dark;
           --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
           --primary-color: #38bdf8;
           --accent-color: #0284c7;
@@ -1450,7 +1452,7 @@ class RadarMapCard extends HTMLElement {
           padding: 6px 10px;
           border-radius: 8px;
           background: rgba(255, 255, 255, 0.07);
-          color: var(--text-color);
+          color: var(--text-color, #f8fafc);
           border: 1px solid var(--border-color);
           font-size: 0.85rem;
           font-weight: 600;
@@ -1458,9 +1460,19 @@ class RadarMapCard extends HTMLElement {
           outline: none;
           box-sizing: border-box;
           height: 36px;
+          color-scheme: dark;
         }
         .device-select:focus {
           border-color: var(--primary-color);
+        }
+        .device-select option {
+          background-color: #1e293b;
+          color: #f8fafc;
+        }
+        .device-select option[value="__new__"] {
+          background-color: #1e293b;
+          color: #38bdf8;
+          font-weight: 700;
         }
         @container (max-width: 480px) {
           .title-wrapper {
@@ -2575,6 +2587,7 @@ class RadarCalibrationCard extends HTMLElement {
           :host {
             display: block;
             font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+            color-scheme: dark;
             --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
             --primary-color: #38bdf8;
             --text-color: var(--primary-text-color, #f8fafc);
@@ -2635,6 +2648,7 @@ class RadarCalibrationCard extends HTMLElement {
         :host {
           display: block;
           font-family: var(--ha-font-family, 'Segoe UI', Roboto, sans-serif);
+          color-scheme: dark;
           --card-bg: var(--ha-card-background, var(--card-background-color, #0f172a));
           --primary-color: #38bdf8;
           --primary-hover: #0284c7;
@@ -2699,7 +2713,7 @@ class RadarCalibrationCard extends HTMLElement {
           padding: 8px 12px;
           border-radius: 8px;
           background: rgba(255, 255, 255, 0.08);
-          color: var(--text-color);
+          color: var(--text-color, #f8fafc);
           border: 1px solid var(--border-color);
           font-size: 0.88rem;
           font-weight: 600;
@@ -2707,9 +2721,26 @@ class RadarCalibrationCard extends HTMLElement {
           outline: none;
           box-sizing: border-box;
           height: 40px;
+          color-scheme: dark;
         }
         .device-select:focus {
           border-color: var(--primary-color);
+        }
+        .device-select option {
+          background-color: #1e293b;
+          color: #f8fafc;
+        }
+        .device-select option[value="__new__"] {
+          background-color: #1e293b;
+          color: #38bdf8;
+          font-weight: 700;
+        }
+        .form-select {
+          color-scheme: dark;
+        }
+        .form-select option {
+          background-color: #1e293b;
+          color: #f8fafc;
         }
         @container (max-width: 520px) {
           .title-wrapper {
