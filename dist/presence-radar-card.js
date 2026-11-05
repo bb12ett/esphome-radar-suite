@@ -910,6 +910,52 @@ class RadarFloorplanManager {
   // ==================================================================
   // GUI CARD EDITOR INTEGRATION (Both Cards)
   // ==================================================================
+  static _processImageFile(file, callback) {
+    if (!file) return;
+    const reader = new FileReader();
+    if (file.type === "image/svg+xml" || file.name.endsWith(".svg")) {
+      reader.onload = (e) => callback(e.target.result);
+      reader.readAsDataURL(file);
+      return;
+    }
+    reader.onload = (e) => {
+      if (typeof Image === "undefined" || typeof document === "undefined") {
+        callback(e.target.result);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          const outType = file.type === "image/png" ? "image/png" : "image/jpeg";
+          const dataUrl = canvas.toDataURL(outType, 0.85);
+          callback(dataUrl);
+        } catch (_) {
+          callback(e.target.result);
+        }
+      };
+      img.onerror = () => callback(e.target.result);
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
   static renderEditorSection(idPrefix = "fpEdit") {
     return `
       <div style="border-top:1px solid rgba(255,255,255,0.12); padding-top:14px; margin-top:6px;">
@@ -933,11 +979,29 @@ class RadarFloorplanManager {
         </div>
 
         <div style="margin-bottom:12px;">
-          <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Floorplan Image Path or URL</label>
-          <input type="text" id="${idPrefix}ImageInput" placeholder="e.g. /local/floorplans/living_room.png"
-                 style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); box-sizing:border-box;" />
-          <div style="font-size:0.72rem; color:var(--secondary-text-color, #94a3b8); margin-top:3px;">
-            Put image files in <code>/config/www/</code> and enter <code>/local/your_image.png</code>.
+          <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:5px;">Floorplan Image Selection</label>
+          
+          <!-- File Selector & Preset Picker Actions -->
+          <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+            <input type="file" id="${idPrefix}FileInput" accept="image/*,.svg,.png,.jpg,.jpeg,.webp" style="display:none;" />
+            <button type="button" id="${idPrefix}BtnChooseFile" style="display:inline-flex; align-items:center; gap:6px; padding:7px 14px; background:rgba(56,189,248,0.16); border:1px solid rgba(56,189,248,0.45); color:#38bdf8; border-radius:6px; font-size:0.82rem; font-weight:600; cursor:pointer;">
+              📁 Choose File from Device
+            </button>
+            <select id="${idPrefix}PresetSelect" style="flex:1; min-width:180px; padding:7px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); font-size:0.82rem;">
+              <option value="">Or pick local floorplan preset...</option>
+              <option value="/local/test_floorplan.svg">✨ Test Floorplan 4x5m (/local/test_floorplan.svg)</option>
+              <option value="/local/floorplan/downstairs/living-room/living-room-day.png">🛋️ Living Room (/local/floorplan/...)</option>
+              <option value="/local/floorplan/downstairs/kitchen/kitchen-day.png">🍳 Kitchen (/local/floorplan/...)</option>
+              <option value="/local/floorplan/downstairs/entryway/entryway-day.png">🚪 Entryway (/local/floorplan/...)</option>
+              <option value="/local/floorplan/downstairs/garage/garage-day.png">🚗 Garage (/local/floorplan/...)</option>
+            </select>
+          </div>
+
+          <!-- URL / Path Input -->
+          <input type="text" id="${idPrefix}ImageInput" placeholder="URL, local path, or chosen file..."
+                 style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2); box-sizing:border-box; font-size:0.82rem;" />
+          <div id="${idPrefix}FileStatus" style="font-size:0.72rem; color:var(--secondary-text-color, #94a3b8); margin-top:4px;">
+            Choose a file from your device, select a local preset, or enter any <code>/local/...</code> path.
           </div>
         </div>
 
@@ -991,7 +1055,11 @@ class RadarFloorplanManager {
   static attachEditorEvents(container, idPrefix = "fpEdit", editorInstance) {
     if (!container) return;
     const selDev = container.querySelector(`#${idPrefix}DeviceSelect`);
+    const btnChoose = container.querySelector(`#${idPrefix}BtnChooseFile`);
+    const fileInp = container.querySelector(`#${idPrefix}FileInput`);
+    const presetSel = container.querySelector(`#${idPrefix}PresetSelect`);
     const inpImg = container.querySelector(`#${idPrefix}ImageInput`);
+    const statusLbl = container.querySelector(`#${idPrefix}FileStatus`);
     const rngOpacity = container.querySelector(`#${idPrefix}OpacityRange`);
     const lblOpacity = container.querySelector(`#${idPrefix}OpacityLabel`);
     const selFit = container.querySelector(`#${idPrefix}FitSelect`);
@@ -1055,6 +1123,33 @@ class RadarFloorplanManager {
       }
     };
 
+    // File Input Picker
+    if (btnChoose && fileInp) {
+      btnChoose.addEventListener("click", () => fileInp.click());
+      fileInp.addEventListener("change", () => {
+        const file = fileInp.files && fileInp.files[0];
+        if (!file) return;
+        if (statusLbl) statusLbl.textContent = `⏳ Loading ${file.name}...`;
+        RadarFloorplanManager._processImageFile(file, (dataUrl) => {
+          if (inpImg) inpImg.value = dataUrl;
+          if (presetSel) presetSel.value = "";
+          if (statusLbl) statusLbl.textContent = `✅ Loaded: ${file.name} (${Math.round(file.size / 1024)} KB)`;
+          saveFromEditor();
+        });
+      });
+    }
+
+    // Preset Dropdown Picker
+    if (presetSel) {
+      presetSel.addEventListener("change", () => {
+        const val = presetSel.value;
+        if (!val) return;
+        if (inpImg) inpImg.value = val;
+        if (statusLbl) statusLbl.textContent = `✅ Selected preset: ${val}`;
+        saveFromEditor();
+      });
+    }
+
     [inpImg, rngOpacity, selFit, inpW, inpD, inpX, inpY].forEach(el => {
       if (el) {
         el.addEventListener("input", saveFromEditor);
@@ -1075,6 +1170,8 @@ class RadarFloorplanManager {
   static _populateEditorFields(container, idPrefix, editorInstance, device) {
     if (!container) return;
     const inpImg = container.querySelector(`#${idPrefix}ImageInput`);
+    const presetSel = container.querySelector(`#${idPrefix}PresetSelect`);
+    const statusLbl = container.querySelector(`#${idPrefix}FileStatus`);
     const rngOpacity = container.querySelector(`#${idPrefix}OpacityRange`);
     const lblOpacity = container.querySelector(`#${idPrefix}OpacityLabel`);
     const selFit = container.querySelector(`#${idPrefix}FitSelect`);
@@ -1088,9 +1185,24 @@ class RadarFloorplanManager {
     const fp = device ? RadarFloorplanManager.getFloorplan(editorInstance._config, device) : null;
 
     const hasDoc = typeof document !== "undefined";
+    const imgVal = (fp && fp.image) || "";
+
     if (inpImg && (!hasDoc || document.activeElement !== inpImg)) {
-      inpImg.value = (fp && fp.image) || "";
+      inpImg.value = imgVal;
     }
+    if (presetSel && (!hasDoc || document.activeElement !== presetSel)) {
+      presetSel.value = (presetSel.querySelector(`option[value="${imgVal}"]`) ? imgVal : "");
+    }
+    if (statusLbl) {
+      if (imgVal.startsWith("data:")) {
+        statusLbl.textContent = "✅ Image file loaded directly from device";
+      } else if (imgVal) {
+        statusLbl.textContent = `✅ Active: ${imgVal}`;
+      } else {
+        statusLbl.innerHTML = "Choose a file from your device, select a local preset, or enter any <code>/local/...</code> path.";
+      }
+    }
+
     const op = fp && fp.opacity !== undefined ? Math.round(fp.opacity * 100) : 45;
     if (rngOpacity && (!hasDoc || document.activeElement !== rngOpacity)) {
       rngOpacity.value = op;
