@@ -164,6 +164,15 @@ The suite handles this automatically:
 
 ---
 
+## 🚀 Automatic Firmware Parity & Update Alerts
+
+The custom cards automatically monitor firmware version parity between Home Assistant and your ESPHome nodes:
+- **Version Parity Check**: The cards inspect `sensor.<node>_radar_suite_version` to ensure your node is running the latest configuration architecture (v1.8.0+).
+- **Update Alerts**: If legacy YAML or an outdated version is detected, an alert banner appears directly on the card with detected vs required versions.
+- **1-Click Native Update**: Tap **`🚀 Update Firmware in HA`** to trigger Home Assistant's native ESPHome OTA update dialog, jump to the ESPHome Dashboard, or view the 1-minute setup guide.
+
+---
+
 ## 🤖 Built with AI & Human Pair Programming
 
 > [!NOTE]

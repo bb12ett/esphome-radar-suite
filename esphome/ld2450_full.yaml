@@ -467,6 +467,16 @@ text_sensor:
     id: zone_calibration_status
     icon: "mdi:ruler-square"
 
+  # Radar Suite Architecture Version (for frontend version parity & update alerts)
+  - platform: template
+    name: "Radar Suite Version"
+    id: radar_suite_version
+    entity_category: diagnostic
+    icon: "mdi:tag-outline"
+    lambda: |-
+      return std::string("1.8.0");
+
+
 # --------------------------------------------------------------------
 # 6. CONFIGURATION NUMBERS & ZONE COORDINATES
 # --------------------------------------------------------------------

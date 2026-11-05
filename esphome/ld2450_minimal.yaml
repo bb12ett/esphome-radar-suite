@@ -189,6 +189,17 @@ sensor:
     name: "Wi-Fi Signal"
     update_interval: 60s
 
+# 4b. DIAGNOSTIC TEXT SENSORS
+text_sensor:
+  # Radar Suite Architecture Version (for frontend version parity & update alerts)
+  - platform: template
+    name: "Radar Suite Version"
+    id: radar_suite_version
+    entity_category: diagnostic
+    icon: "mdi:tag-outline"
+    lambda: |-
+      return std::string("1.8.0");
+
 # 5. CONFIGURATION NUMBERS (ROOM BOUNDARIES & ZONES 1-4)
 number:
   # Room Geometry Settings (Read & written by the Lovelace Radar Cards)

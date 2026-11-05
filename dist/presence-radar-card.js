@@ -339,7 +339,11 @@ class RadarEntityResolver {
       invert_x_switch: findFirstExisting("switch", ["invert_x_axis_upside_down_mount", "invert_x_axis", "invert_x"]),
       restart_esp: findEntity("button", "restart_esp32"),
       restart_radar: findEntity("button", "restart_radar"),
-      factory_reset_radar: findEntity("button", "factory_reset_radar")
+      factory_reset_radar: findEntity("button", "factory_reset_radar"),
+
+      // Firmware Version Parity & HA Update Entity
+      suite_version: findFirstExisting("sensor", ["radar_suite_version", "suite_version"]),
+      firmware_update: findFirstExisting("update", ["firmware", "update"])
     };
   }
 
@@ -773,6 +777,208 @@ class RadarMapCardEditor extends HTMLElement {
 }
 
 // ====================================================================
+// UPDATE MANAGER: Firmware Version Parity & Update Notification Banner
+// ====================================================================
+class RadarUpdateManager {
+  static REQUIRED_VERSION = "1.8.0";
+  static _dismissed = new Set();
+
+  static parseSemver(v) {
+    if (!v || typeof v !== "string") return [0, 0, 0];
+    const clean = v.replace(/^v/i, "").trim();
+    const parts = clean.split(".").map(p => parseInt(p, 10) || 0);
+    while (parts.length < 3) parts.push(0);
+    return parts;
+  }
+
+  static compareVersions(a, b) {
+    const pa = this.parseSemver(a);
+    const pb = this.parseSemver(b);
+    for (let i = 0; i < 3; i++) {
+      if (pa[i] > pb[i]) return 1;
+      if (pa[i] < pb[i]) return -1;
+    }
+    return 0;
+  }
+
+  static isDismissed(device) {
+    return this._dismissed.has(device);
+  }
+
+  static dismiss(device) {
+    if (device) this._dismissed.add(device);
+  }
+
+  static checkStatus(hass, entities, devicePrefix) {
+    if (!hass || !entities) return { hasAlert: false };
+    if (devicePrefix && this.isDismissed(devicePrefix)) return { hasAlert: false };
+
+    const states = hass.states || {};
+
+    // Only evaluate if sensor is alive/known in HA
+    const occEnt = states[entities.occupancy];
+    const t1Ent = states[entities.target1_x];
+    const wifiEnt = states[entities.wifi_signal];
+    const isAlive = (occEnt && occEnt.state !== "unavailable") ||
+                    (t1Ent && t1Ent.state !== "unavailable") ||
+                    (wifiEnt && wifiEnt.state !== "unavailable");
+
+    if (!isAlive) return { hasAlert: false };
+
+    // 1. Check for legacy architecture entity: number.active_zones
+    const legacyActiveZonesId = entities.active_zones;
+    const hasLegacyActiveZones = Boolean(legacyActiveZonesId && states[legacyActiveZonesId] && states[legacyActiveZonesId].state !== "unavailable");
+
+    // 2. Check suite_version sensor
+    const versionEntId = entities.suite_version;
+    const versionState = versionEntId && states[versionEntId] ? states[versionEntId].state : null;
+    const isMissingVersion = !versionState || versionState === "unknown" || versionState === "unavailable";
+
+    const updateId = entities.firmware_update;
+    const hasUpdateEntity = Boolean(updateId && states[updateId]);
+
+    if (hasLegacyActiveZones || isMissingVersion) {
+      return {
+        hasAlert: true,
+        isBreaking: true,
+        type: "legacy",
+        currentVersion: (!isMissingVersion && versionState) ? versionState : "pre-1.8.0",
+        requiredVersion: this.REQUIRED_VERSION,
+        updateEntity: hasUpdateEntity ? updateId : null,
+        title: "ESPHome YAML Update Required",
+        message: "This sensor is running older YAML. Update is required for dynamic per-zone toggles and radar engine parity."
+      };
+    }
+
+    // 3. Version sensor exists, compare semantic version
+    if (this.compareVersions(versionState, this.REQUIRED_VERSION) < 0) {
+      return {
+        hasAlert: true,
+        isBreaking: true,
+        type: "outdated",
+        currentVersion: versionState,
+        requiredVersion: this.REQUIRED_VERSION,
+        updateEntity: hasUpdateEntity ? updateId : null,
+        title: "Firmware Update Required",
+        message: `Detected v${versionState}. Suite architecture requires v${this.REQUIRED_VERSION}+ for dynamic per-zone controls.`
+      };
+    }
+
+    // 4. Parity is met, check if HA's ESPHome update entity is flagged "on"
+    if (hasUpdateEntity && states[updateId].state === "on") {
+      const attrs = states[updateId].attributes || {};
+      return {
+        hasAlert: true,
+        isBreaking: false,
+        type: "available",
+        currentVersion: versionState,
+        latestVersion: attrs.latest_version || "Latest",
+        updateEntity: updateId,
+        title: "Firmware Update Available",
+        message: "A new ESPHome firmware build is ready for this sensor."
+      };
+    }
+
+    return { hasAlert: false };
+  }
+
+  static renderBannerHtml(status, idPrefix) {
+    if (!status || !status.hasAlert) return "";
+    const isBreaking = status.isBreaking;
+    return `
+      <div id="${idPrefix}UpdateBanner" class="radar-update-banner ${isBreaking ? 'breaking' : 'available'}">
+        <div class="radar-update-banner-header">
+          <div class="radar-update-banner-content">
+            <div class="radar-update-icon">${isBreaking ? '⚠️' : '✨'}</div>
+            <div style="flex: 1; min-width: 0;">
+              <div class="radar-update-title">
+                <span>${status.title}</span>
+                <span class="radar-update-badge">${isBreaking ? `Detected: ${status.currentVersion} ➔ Required: v${status.requiredVersion}+` : `Update Available (${status.latestVersion})`}</span>
+              </div>
+              <div class="radar-update-sub">${status.message}</div>
+            </div>
+          </div>
+          <button id="${idPrefix}BtnDismissBanner" class="radar-update-btn-close" title="Dismiss for this session">✕</button>
+        </div>
+        <div class="radar-update-actions">
+          <button id="${idPrefix}BtnTriggerUpdate" class="btn-update-primary">
+            🚀 ${status.updateEntity ? 'Update Firmware in HA' : 'Open ESPHome Dashboard'}
+          </button>
+          <button id="${idPrefix}BtnOpenDashboard" class="btn-update-secondary">
+            🛠️ ESPHome Dashboard
+          </button>
+          <button id="${idPrefix}BtnViewGuide" class="btn-update-link">
+            📋 YAML Setup Guide
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  static attachEvents(shadowRoot, idPrefix, devicePrefix, cardInstance) {
+    if (!shadowRoot) return;
+    const btnDismiss = shadowRoot.getElementById(`${idPrefix}BtnDismissBanner`);
+    if (btnDismiss) {
+      btnDismiss.addEventListener("click", () => {
+        this.dismiss(devicePrefix);
+        const container = shadowRoot.getElementById(`${idPrefix}UpdateBannerContainer`);
+        if (container) {
+          container.innerHTML = "";
+          container.dataset.statusKey = `${devicePrefix}_dismissed`;
+        }
+      });
+    }
+
+    const btnUpdate = shadowRoot.getElementById(`${idPrefix}BtnTriggerUpdate`);
+    if (btnUpdate) {
+      btnUpdate.addEventListener("click", () => {
+        const status = this.checkStatus(cardInstance._hass, cardInstance._entities, devicePrefix);
+        if (status && status.updateEntity && cardInstance._hass.states[status.updateEntity]) {
+          cardInstance._openMoreInfo(status.updateEntity);
+        } else {
+          window.open("/esphome_dashboard", "_blank");
+        }
+      });
+    }
+
+    const btnDashboard = shadowRoot.getElementById(`${idPrefix}BtnOpenDashboard`);
+    if (btnDashboard) {
+      btnDashboard.addEventListener("click", () => {
+        window.open("/esphome_dashboard", "_blank");
+      });
+    }
+
+    const btnGuide = shadowRoot.getElementById(`${idPrefix}BtnViewGuide`);
+    if (btnGuide) {
+      btnGuide.addEventListener("click", () => {
+        const friendlyName = cardInstance._entities?.friendly_name ||
+          (cardInstance._selectedDevice ? cardInstance._selectedDevice.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()) : "");
+        RadarSetupWizard.open(shadowRoot, idPrefix === "calUpd" ? "calWz" : "mapWz", friendlyName);
+      });
+    }
+  }
+
+  static updateBanner(shadowRoot, idPrefix, hass, entities, devicePrefix, cardInstance) {
+    if (!shadowRoot) return;
+    const container = shadowRoot.getElementById(`${idPrefix}UpdateBannerContainer`);
+    if (!container) return;
+
+    const status = this.checkStatus(hass, entities, devicePrefix);
+    const statusKey = status.hasAlert 
+      ? `${devicePrefix}_${status.type}_${status.currentVersion}_${status.latestVersion || ""}`
+      : `${devicePrefix}_none`;
+
+    if (container.dataset.statusKey === statusKey) return;
+    container.dataset.statusKey = statusKey;
+
+    container.innerHTML = this.renderBannerHtml(status, idPrefix);
+    if (status.hasAlert) {
+      this.attachEvents(shadowRoot, idPrefix, devicePrefix, cardInstance);
+    }
+  }
+}
+
+// ====================================================================
 // SETUP WIZARD: In-Card Quick Setup Guide & YAML Generator
 // ====================================================================
 class RadarSetupWizard {
@@ -941,12 +1147,18 @@ packages:
     });
   }
 
-  static open(shadowRoot, idPrefix) {
+  static open(shadowRoot, idPrefix, friendlyName = "") {
     const overlay = shadowRoot.getElementById(`${idPrefix}ModalOverlay`);
     if (overlay) {
       overlay.style.display = "flex";
       const inp = shadowRoot.getElementById(`${idPrefix}InpName`);
-      if (inp) setTimeout(() => inp.focus(), 50);
+      if (inp) {
+        if (friendlyName) {
+          inp.value = friendlyName;
+          inp.dispatchEvent(new Event("input"));
+        }
+        setTimeout(() => inp.focus(), 50);
+      }
     }
   }
 }
@@ -1100,6 +1312,7 @@ class RadarMapCard extends HTMLElement {
 
     const hasPinnedDevice = Boolean(this._config && this._config.device);
     const isMinimal = this._config && this._config.layout_mode === "minimal";
+    const updateStatus = RadarUpdateManager.checkStatus(this._hass, this._entities, this._selectedDevice);
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1365,6 +1578,156 @@ class RadarMapCard extends HTMLElement {
           stroke-width: 22px;
           filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.8));
         }
+        /* Firmware & YAML Update Alert Banner */
+        .radar-update-container {
+          width: 100%;
+        }
+        .radar-update-banner {
+          background: rgba(245, 158, 11, 0.12);
+          border: 1px solid rgba(245, 158, 11, 0.45);
+          border-radius: 12px;
+          padding: 12px 14px;
+          margin-bottom: 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          animation: radarFadeIn 0.3s ease-in-out;
+          box-sizing: border-box;
+        }
+        .radar-update-banner.available {
+          background: rgba(56, 189, 248, 0.12);
+          border-color: rgba(56, 189, 248, 0.45);
+        }
+        .radar-update-banner-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .radar-update-banner-content {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          flex: 1;
+          min-width: 0;
+        }
+        .radar-update-icon {
+          font-size: 1.25rem;
+          line-height: 1;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+        .radar-update-title {
+          font-size: 0.86rem;
+          font-weight: 700;
+          color: #fbbf24;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .radar-update-banner.available .radar-update-title {
+          color: #38bdf8;
+        }
+        .radar-update-badge {
+          font-size: 0.7rem;
+          font-weight: 600;
+          background: rgba(245, 158, 11, 0.22);
+          border: 1px solid rgba(245, 158, 11, 0.4);
+          color: #fbbf24;
+          padding: 1px 6px;
+          border-radius: 4px;
+        }
+        .radar-update-banner.available .radar-update-badge {
+          background: rgba(56, 189, 248, 0.2);
+          border-color: rgba(56, 189, 248, 0.4);
+          color: #38bdf8;
+        }
+        .radar-update-sub {
+          font-size: 0.78rem;
+          color: var(--text-color, #f8fafc);
+          opacity: 0.88;
+          line-height: 1.4;
+          margin-top: 3px;
+        }
+        .radar-update-btn-close {
+          background: transparent;
+          border: none;
+          color: var(--text-muted, #94a3b8);
+          font-size: 1.1rem;
+          cursor: pointer;
+          padding: 0 4px;
+          line-height: 1;
+          opacity: 0.7;
+          border-radius: 4px;
+        }
+        .radar-update-btn-close:hover {
+          opacity: 1;
+          color: var(--text-color, #f8fafc);
+        }
+        .radar-update-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          padding-left: 30px;
+        }
+        .btn-update-primary {
+          background: #f59e0b;
+          color: #0f172a;
+          border: none;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 0.78rem;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: background 0.15s, box-shadow 0.15s;
+        }
+        .btn-update-primary:hover {
+          background: #fbbf24;
+          box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+        }
+        .radar-update-banner.available .btn-update-primary {
+          background: #38bdf8;
+        }
+        .radar-update-banner.available .btn-update-primary:hover {
+          background: #7dd3fc;
+          box-shadow: 0 2px 8px rgba(56, 189, 248, 0.4);
+        }
+        .btn-update-secondary {
+          background: rgba(255, 255, 255, 0.08);
+          color: var(--text-color, #f8fafc);
+          border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: background 0.15s;
+        }
+        .btn-update-secondary:hover {
+          background: rgba(255, 255, 255, 0.14);
+        }
+        .btn-update-link {
+          background: transparent;
+          border: none;
+          color: var(--primary-color, #38bdf8);
+          font-size: 0.76rem;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 4px 6px;
+          text-decoration: underline;
+        }
+        @keyframes radarFadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
       </style>
 
       <ha-card>
@@ -1390,6 +1753,10 @@ class RadarMapCard extends HTMLElement {
             <div class="chip" id="chipLatched" style="display:none;">🧠 Latched</div>
             <div class="chip" id="chipWifi">📶 -- dBm</div>
           </div>
+        </div>
+
+        <div id="mapUpdUpdateBannerContainer" class="radar-update-container">
+          ${RadarUpdateManager.renderBannerHtml(updateStatus, "mapUpd")}
         </div>
 
         <div class="map-viewport">
@@ -1455,6 +1822,7 @@ class RadarMapCard extends HTMLElement {
     `;
 
     RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz");
+    RadarUpdateManager.attachEvents(this.shadowRoot, "mapUpd", this._selectedDevice, this);
 
     const selectEl = this.shadowRoot.getElementById("mapDeviceSelect");
     if (selectEl) {
@@ -1529,6 +1897,8 @@ class RadarMapCard extends HTMLElement {
     if (!this._entities) {
       this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
     }
+    RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", this._hass, this._entities, this._selectedDevice, this);
+    RadarUpdateManager.updateBanner(this.shadowRoot, "mapUpd", this._hass, this._entities, this._selectedDevice, this);
 
     const ent = this._entities;
     const states = this._hass.states;
@@ -2035,6 +2405,7 @@ class RadarCalibrationCard extends HTMLElement {
 
   _initFormStateFromEntities() {
     if (!this._entities || !this._hass) return;
+    RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", this._hass, this._entities, this._selectedDevice, this);
     const ent = this._entities;
     const states = this._hass.states;
 
@@ -2181,6 +2552,7 @@ class RadarCalibrationCard extends HTMLElement {
     }
 
     const hasPinnedDevice = Boolean(this._config && this._config.device);
+    const updateStatus = RadarUpdateManager.checkStatus(this._hass, this._entities, this._selectedDevice);
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -2660,6 +3032,156 @@ class RadarCalibrationCard extends HTMLElement {
           align-items: center;
           gap: 8px;
         }
+        /* Firmware & YAML Update Alert Banner */
+        .radar-update-container {
+          width: 100%;
+        }
+        .radar-update-banner {
+          background: rgba(245, 158, 11, 0.12);
+          border: 1px solid rgba(245, 158, 11, 0.45);
+          border-radius: 12px;
+          padding: 12px 14px;
+          margin-bottom: 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          animation: radarFadeIn 0.3s ease-in-out;
+          box-sizing: border-box;
+        }
+        .radar-update-banner.available {
+          background: rgba(56, 189, 248, 0.12);
+          border-color: rgba(56, 189, 248, 0.45);
+        }
+        .radar-update-banner-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .radar-update-banner-content {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          flex: 1;
+          min-width: 0;
+        }
+        .radar-update-icon {
+          font-size: 1.25rem;
+          line-height: 1;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+        .radar-update-title {
+          font-size: 0.86rem;
+          font-weight: 700;
+          color: #fbbf24;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .radar-update-banner.available .radar-update-title {
+          color: #38bdf8;
+        }
+        .radar-update-badge {
+          font-size: 0.7rem;
+          font-weight: 600;
+          background: rgba(245, 158, 11, 0.22);
+          border: 1px solid rgba(245, 158, 11, 0.4);
+          color: #fbbf24;
+          padding: 1px 6px;
+          border-radius: 4px;
+        }
+        .radar-update-banner.available .radar-update-badge {
+          background: rgba(56, 189, 248, 0.2);
+          border-color: rgba(56, 189, 248, 0.4);
+          color: #38bdf8;
+        }
+        .radar-update-sub {
+          font-size: 0.78rem;
+          color: var(--text-color, #f8fafc);
+          opacity: 0.88;
+          line-height: 1.4;
+          margin-top: 3px;
+        }
+        .radar-update-btn-close {
+          background: transparent;
+          border: none;
+          color: var(--text-muted, #94a3b8);
+          font-size: 1.1rem;
+          cursor: pointer;
+          padding: 0 4px;
+          line-height: 1;
+          opacity: 0.7;
+          border-radius: 4px;
+        }
+        .radar-update-btn-close:hover {
+          opacity: 1;
+          color: var(--text-color, #f8fafc);
+        }
+        .radar-update-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          padding-left: 30px;
+        }
+        .btn-update-primary {
+          background: #f59e0b;
+          color: #0f172a;
+          border: none;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 0.78rem;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: background 0.15s, box-shadow 0.15s;
+        }
+        .btn-update-primary:hover {
+          background: #fbbf24;
+          box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+        }
+        .radar-update-banner.available .btn-update-primary {
+          background: #38bdf8;
+        }
+        .radar-update-banner.available .btn-update-primary:hover {
+          background: #7dd3fc;
+          box-shadow: 0 2px 8px rgba(56, 189, 248, 0.4);
+        }
+        .btn-update-secondary {
+          background: rgba(255, 255, 255, 0.08);
+          color: var(--text-color, #f8fafc);
+          border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: background 0.15s;
+        }
+        .btn-update-secondary:hover {
+          background: rgba(255, 255, 255, 0.14);
+        }
+        .btn-update-link {
+          background: transparent;
+          border: none;
+          color: var(--primary-color, #38bdf8);
+          font-size: 0.76rem;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 4px 6px;
+          text-decoration: underline;
+        }
+        @keyframes radarFadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
       </style>
 
       <ha-card>
@@ -2692,6 +3214,9 @@ class RadarCalibrationCard extends HTMLElement {
 
         <div class="toast-banner" id="toastBanner"></div>
 
+        <div id="calUpdUpdateBannerContainer" class="radar-update-container">
+          ${RadarUpdateManager.renderBannerHtml(updateStatus, "calUpd")}
+        </div>
 
         <!-- Interactive Live Viewfinder SVG (Visible on ALL tabs!) -->
         <div class="mini-viewfinder">
@@ -2880,6 +3405,7 @@ class RadarCalibrationCard extends HTMLElement {
     `;
 
     RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", (msg) => this._showToast(msg));
+    RadarUpdateManager.attachEvents(this.shadowRoot, "calUpd", this._selectedDevice, this);
 
     this._bindEvents();
     this._initFormStateFromEntities();
