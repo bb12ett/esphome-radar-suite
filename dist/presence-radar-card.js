@@ -1295,6 +1295,192 @@ if (typeof window !== "undefined") {
 }
 
 // ====================================================================
+// RADAR ZOOM CONTROLLER: Universal Smooth Zoom & Pan Engine
+// ====================================================================
+class RadarZoomController {
+  constructor(cardInstance, svgId, idPrefix) {
+    this.card = cardInstance;
+    this.svgId = svgId;
+    this.idPrefix = idPrefix;
+
+    this.zoom = 1.0;
+    this.panX = 0;
+    this.panY = 0;
+    this.baseVb = null;
+  }
+
+  setBaseViewBox(x, y, width, height) {
+    this.baseVb = { x, y, width, height };
+    this.apply();
+  }
+
+  apply() {
+    if (!this.baseVb) return;
+    const svg = this.card.shadowRoot.getElementById(this.svgId);
+    if (!svg) return;
+
+    const w = this.baseVb.width / this.zoom;
+    const h = this.baseVb.height / this.zoom;
+    const cx = this.baseVb.x + (this.baseVb.width / 2) + this.panX;
+    const cy = this.baseVb.y + (this.baseVb.height / 2) + this.panY;
+    const vx = cx - (w / 2);
+    const vy = cy - (h / 2);
+
+    svg.setAttribute("viewBox", `${vx} ${vy} ${w} ${h}`);
+
+    const badge = this.card.shadowRoot.getElementById(`${this.idPrefix}ZoomBadge`);
+    if (badge) {
+      if (Math.abs(this.zoom - 1.0) > 0.01 || Math.abs(this.panX) > 1 || Math.abs(this.panY) > 1) {
+        badge.style.display = "block";
+        badge.textContent = `${Math.round(this.zoom * 100)}%`;
+      } else {
+        badge.style.display = "none";
+      }
+    }
+  }
+
+  zoomIn() {
+    this.zoom = Math.min(4.0, Math.round((this.zoom + 0.25) * 100) / 100);
+    this.apply();
+  }
+
+  zoomOut() {
+    this.zoom = Math.max(0.5, Math.round((this.zoom - 0.25) * 100) / 100);
+    this.apply();
+  }
+
+  reset() {
+    this.zoom = 1.0;
+    this.panX = 0;
+    this.panY = 0;
+    this.apply();
+  }
+
+  static renderControlsHtml(idPrefix) {
+    return `
+      <div class="radar-zoom-controls" id="${idPrefix}ZoomControls">
+        <span class="radar-zoom-badge" id="${idPrefix}ZoomBadge">100%</span>
+        <button type="button" class="radar-zoom-btn" id="${idPrefix}BtnZoomIn" title="Zoom In (or mouse wheel / pinch)">➕</button>
+        <button type="button" class="radar-zoom-btn" id="${idPrefix}BtnZoomOut" title="Zoom Out (or mouse wheel / pinch)">➖</button>
+        <button type="button" class="radar-zoom-btn" id="${idPrefix}BtnZoomReset" title="Reset View">⟲</button>
+      </div>
+    `;
+  }
+
+  attachEvents() {
+    const root = this.card.shadowRoot;
+    if (!root) return;
+    const btnIn = root.getElementById(`${this.idPrefix}BtnZoomIn`);
+    const btnOut = root.getElementById(`${this.idPrefix}BtnZoomOut`);
+    const btnReset = root.getElementById(`${this.idPrefix}BtnZoomReset`);
+
+    if (btnIn) btnIn.addEventListener("click", (e) => { e.stopPropagation(); this.zoomIn(); });
+    if (btnOut) btnOut.addEventListener("click", (e) => { e.stopPropagation(); this.zoomOut(); });
+    if (btnReset) btnReset.addEventListener("click", (e) => { e.stopPropagation(); this.reset(); });
+
+    const svg = root.getElementById(this.svgId);
+    if (!svg) return;
+
+    // Mouse wheel zoom
+    svg.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 0.87;
+      const newZoom = Math.min(4.0, Math.max(0.5, this.zoom * factor));
+      this.zoom = Math.round(newZoom * 100) / 100;
+      this.apply();
+    }, { passive: false });
+
+    // Touch Pinch-to-zoom (two-finger) & Pan
+    let initialTouchDist = null;
+    let initialZoom = 1.0;
+    let initialMid = null;
+
+    svg.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        initialTouchDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        initialZoom = this.zoom;
+        initialMid = {
+          x: (t1.clientX + t2.clientX) / 2,
+          y: (t1.clientY + t2.clientY) / 2
+        };
+      }
+    }, { passive: false });
+
+    svg.addEventListener("touchmove", (e) => {
+      if (e.touches.length === 2 && initialTouchDist) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const scale = dist / initialTouchDist;
+        this.zoom = Math.min(4.0, Math.max(0.5, Math.round(initialZoom * scale * 100) / 100));
+
+        // Two-finger pan
+        const midX = (t1.clientX + t2.clientX) / 2;
+        const midY = (t1.clientY + t2.clientY) / 2;
+        if (initialMid && this.baseVb) {
+          const rect = svg.getBoundingClientRect();
+          const svgScaleX = (this.baseVb.width / this.zoom) / (rect.width || 1);
+          const svgScaleY = (this.baseVb.height / this.zoom) / (rect.height || 1);
+          this.panX -= (midX - initialMid.x) * svgScaleX;
+          this.panY -= (midY - initialMid.y) * svgScaleY;
+          initialMid = { x: midX, y: midY };
+        }
+
+        this.apply();
+      }
+    }, { passive: false });
+
+    svg.addEventListener("touchend", (e) => {
+      if (e.touches.length < 2) {
+        initialTouchDist = null;
+        initialMid = null;
+      }
+    });
+
+    // Desktop click-drag Pan while zoomed in
+    let isPanning = false;
+    let startPanClient = null;
+
+    svg.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".radar-zoom-controls") || e.target.closest("[data-handle-type]")) return;
+      if (e.button === 1 || (this.zoom > 1.05 && (!this.card._mapEditMode || e.altKey || e.button === 1))) {
+        isPanning = true;
+        startPanClient = { x: e.clientX, y: e.clientY };
+        svg.setPointerCapture(e.pointerId);
+      }
+    });
+
+    svg.addEventListener("pointermove", (e) => {
+      if (isPanning && startPanClient && this.baseVb) {
+        const rect = svg.getBoundingClientRect();
+        const svgScaleX = (this.baseVb.width / this.zoom) / (rect.width || 1);
+        const svgScaleY = (this.baseVb.height / this.zoom) / (rect.height || 1);
+        this.panX -= (e.clientX - startPanClient.x) * svgScaleX;
+        this.panY -= (e.clientY - startPanClient.y) * svgScaleY;
+        startPanClient = { x: e.clientX, y: e.clientY };
+        this.apply();
+      }
+    });
+
+    const endPan = () => {
+      isPanning = false;
+      startPanClient = null;
+    };
+    svg.addEventListener("pointerup", endPan);
+    svg.addEventListener("pointercancel", endPan);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.RadarZoomController = RadarZoomController;
+}
+
+
+// ====================================================================
 // GUI EDITOR: RADAR MAP CARD EDITOR (Single-Render, Focus Preserving)
 // ====================================================================
 class RadarMapCardEditor extends HTMLElement {
@@ -1891,6 +2077,7 @@ class RadarMapCard extends HTMLElement {
     this._trails = { 1: [], 2: [], 3: [] };
     this._selectedDevice = "";
     this._syncHandler = null;
+    this._zoomController = new RadarZoomController(this, "radarSvg", "map");
   }
 
   static getConfigElement() {
@@ -2090,6 +2277,7 @@ class RadarMapCard extends HTMLElement {
         </ha-card>
       `;
       RadarSetupWizard.attachEvents(this.shadowRoot, "mapWz", null, this);
+    if (this._zoomController) this._zoomController.attachEvents();
       const btn = this.shadowRoot.getElementById("btnMapEmptySetup");
       if (btn) btn.addEventListener("click", () => RadarSetupWizard.open(this.shadowRoot, "mapWz"));
       return;
@@ -2263,6 +2451,58 @@ class RadarMapCard extends HTMLElement {
           border: 1px solid var(--border-color);
           overflow: hidden;
         }
+        .radar-zoom-controls {
+          position: absolute;
+          right: 12px;
+          bottom: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          z-index: 50;
+          pointer-events: all;
+          user-select: none;
+        }
+        .radar-zoom-btn {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          background: rgba(15, 23, 42, 0.78);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          color: #f8fafc;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          backdrop-filter: blur(4px);
+          font-size: 13px;
+          line-height: 1;
+          padding: 0;
+          outline: none;
+          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+          transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        }
+        .radar-zoom-btn:hover {
+          background: rgba(30, 41, 59, 0.95);
+          border-color: #38bdf8;
+          color: #38bdf8;
+        }
+        .radar-zoom-btn:active {
+          transform: scale(0.92);
+        }
+        .radar-zoom-badge {
+          font-size: 10px;
+          font-weight: 700;
+          color: #38bdf8;
+          background: rgba(15, 23, 42, 0.88);
+          border: 1px solid rgba(56, 189, 248, 0.4);
+          border-radius: 6px;
+          padding: 2px 4px;
+          text-align: center;
+          display: none;
+          backdrop-filter: blur(4px);
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
         svg {
           width: 100%;
           height: 100%;
@@ -2602,6 +2842,7 @@ class RadarMapCard extends HTMLElement {
             <!-- Sensor Mount Icon -->
             <g id="sensorIconLayer"></g>
           </svg>
+          ${RadarZoomController.renderControlsHtml("map")}
         </div>
 
         <div class="details-grid" id="targetsDetailsGrid" style="${isMinimal ? "display: none;" : ""}">
@@ -2759,7 +3000,13 @@ class RadarMapCard extends HTMLElement {
       const margin = 500;
       const minVbX = Math.min(0, geom.sx) - margin;
       const maxVbX = Math.max(geom.roomWidth, geom.sx) + margin;
-      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${maxVbX - minVbX} ${geom.roomDepth + margin * 2}`);
+      const vbW = maxVbX - minVbX;
+      const vbH = geom.roomDepth + margin * 2;
+      if (this._zoomController) {
+        this._zoomController.setBaseViewBox(minVbX, -margin, vbW, vbH);
+      } else {
+        svg.setAttribute("viewBox", `${minVbX} ${-margin} ${vbW} ${vbH}`);
+      }
       const clipRect = this.shadowRoot.getElementById("radarRoomClipRect");
       if (clipRect) {
         clipRect.setAttribute("width", geom.roomWidth);
@@ -3114,6 +3361,7 @@ class RadarCalibrationCard extends HTMLElement {
     this._mapEditMode = false;
     this._mapSnapGrid = 50;
     this._activeDrag = null;
+    this._zoomController = new RadarZoomController(this, "viewfinderSvg", "cal");
     this._zoneEditCoords = {};
     this._modifiedZones = new Set();
     this._initialEditSnapshot = null;
@@ -3906,6 +4154,58 @@ class RadarCalibrationCard extends HTMLElement {
         .mini-viewfinder.editing svg {
           touch-action: none;
         }
+        .radar-zoom-controls {
+          position: absolute;
+          right: 12px;
+          bottom: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          z-index: 50;
+          pointer-events: all;
+          user-select: none;
+        }
+        .radar-zoom-btn {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          background: rgba(15, 23, 42, 0.78);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          color: #f8fafc;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          backdrop-filter: blur(4px);
+          font-size: 13px;
+          line-height: 1;
+          padding: 0;
+          outline: none;
+          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+          transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        }
+        .radar-zoom-btn:hover {
+          background: rgba(30, 41, 59, 0.95);
+          border-color: #38bdf8;
+          color: #38bdf8;
+        }
+        .radar-zoom-btn:active {
+          transform: scale(0.92);
+        }
+        .radar-zoom-badge {
+          font-size: 10px;
+          font-weight: 700;
+          color: #38bdf8;
+          background: rgba(15, 23, 42, 0.88);
+          border: 1px solid rgba(56, 189, 248, 0.4);
+          border-radius: 6px;
+          padding: 2px 4px;
+          text-align: center;
+          display: none;
+          backdrop-filter: blur(4px);
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
         .vf-handle {
           pointer-events: all;
           transition: filter 0.15s;
@@ -4311,6 +4611,7 @@ class RadarCalibrationCard extends HTMLElement {
             <g id="vfEditHandlesLayer"></g>
             <g id="vfHudLayer"></g>
           </svg>
+          ${RadarZoomController.renderControlsHtml("cal")}
         </div>
 
         <!-- Tabs Navigation -->
@@ -4478,6 +4779,7 @@ class RadarCalibrationCard extends HTMLElement {
     `;
 
     RadarSetupWizard.attachEvents(this.shadowRoot, "calWz", (msg) => this._showToast(msg), this);
+    if (this._zoomController) this._zoomController.attachEvents();
     RadarUpdateManager.attachEvents(this.shadowRoot, "calUpd", this._selectedDevice, this);
 
     this._bindEvents();
@@ -5420,7 +5722,13 @@ class RadarCalibrationCard extends HTMLElement {
       const margin = 500;
       const minVbX = Math.min(0, sx) - margin;
       const maxVbX = Math.max(rw, sx) + margin;
-      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${maxVbX - minVbX} ${rd + margin * 2}`);
+      const vbW = maxVbX - minVbX;
+      const vbH = rd + margin * 2;
+      if (this._zoomController) {
+        this._zoomController.setBaseViewBox(minVbX, -margin, vbW, vbH);
+      } else {
+        svg.setAttribute("viewBox", `${minVbX} ${-margin} ${vbW} ${vbH}`);
+      }
       const vfClipRect = this.shadowRoot.getElementById("vfRoomClipRect");
       if (vfClipRect) {
         vfClipRect.setAttribute("width", rw);
