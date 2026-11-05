@@ -2604,6 +2604,12 @@ class RadarCalibrationCard extends HTMLElement {
       sensorOffsetX: 0,
       mountingYaw: 0
     };
+    this._mapEditMode = false;
+    this._mapSnapGrid = 50;
+    this._activeDrag = null;
+    this._zoneEditCoords = {};
+    this._modifiedZones = new Set();
+    this._initialEditSnapshot = null;
   }
 
   static getConfigElement() {
@@ -2672,6 +2678,10 @@ class RadarCalibrationCard extends HTMLElement {
   _switchDevice(device, broadcast) {
     this._selectedDevice = device;
     this._locallyEnabledZones = new Set();
+    if (this._mapEditMode) {
+      this._mapEditMode = false;
+      this._activeDrag = null;
+    }
     this._resetLiveCaches();
     if (!this._hass) return;
     this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
@@ -3293,6 +3303,80 @@ class RadarCalibrationCard extends HTMLElement {
         .btn-danger:hover {
           background: rgba(239, 68, 68, 0.25);
         }
+        .vf-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 10px;
+          margin-bottom: 6px;
+        }
+        .vf-header-title {
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: var(--text-muted);
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .btn-vf-edit {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 14px;
+          border-radius: 8px;
+          background: rgba(56, 189, 248, 0.12);
+          border: 1px solid rgba(56, 189, 248, 0.35);
+          color: #38bdf8;
+          font-size: 0.82rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .btn-vf-edit:hover, .btn-vf-edit.active {
+          background: #38bdf8;
+          color: #0f172a;
+          box-shadow: 0 0 14px rgba(56, 189, 248, 0.5);
+        }
+        .vf-edit-toolbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 8px 12px;
+          background: rgba(56, 189, 248, 0.08);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          border-radius: 8px;
+          margin-bottom: 8px;
+          animation: radarFadeIn 0.25s ease-in-out;
+        }
+        .vf-edit-badge {
+          background: #38bdf8;
+          color: #0f172a;
+          font-size: 0.72rem;
+          font-weight: 800;
+          padding: 2px 6px;
+          border-radius: 4px;
+          letter-spacing: 0.05em;
+        }
+        .vf-edit-hint {
+          font-size: 0.78rem;
+          color: var(--text-muted);
+        }
+        .btn-vf-snap {
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid var(--border-color);
+          color: var(--text-color);
+          padding: 5px 10px;
+          border-radius: 6px;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+        .btn-vf-snap:hover {
+          background: rgba(255, 255, 255, 0.15);
+        }
         .mini-viewfinder {
           width: 100%;
           aspect-ratio: 16 / 10;
@@ -3300,7 +3384,20 @@ class RadarCalibrationCard extends HTMLElement {
           border-radius: 12px;
           border: 1px solid var(--border-color);
           overflow: hidden;
-          margin: 12px 0;
+          margin: 10px 0 14px 0;
+          position: relative;
+          touch-action: none;
+        }
+        .mini-viewfinder.editing {
+          border: 2px solid #38bdf8;
+          box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+        }
+        .vf-handle {
+          pointer-events: all;
+          transition: filter 0.15s;
+        }
+        .vf-handle:hover {
+          filter: drop-shadow(0 0 10px #38bdf8);
         }
         .vf-zone-group {
           cursor: pointer;
@@ -3644,8 +3741,38 @@ class RadarCalibrationCard extends HTMLElement {
           ${RadarUpdateManager.renderBannerHtml(updateStatus, "calUpd", this._hass)}
         </div>
 
+        <!-- Interactive Live Viewfinder Header -->
+        <div class="vf-header">
+          <div class="vf-header-title">
+            <span>📡 Live Radar Map & Viewfinder</span>
+          </div>
+          <div>
+            <button id="btnToggleMapEdit" class="btn-vf-edit ${this._mapEditMode ? "active" : ""}" title="Toggle Interactive Drag & Drop Map Editor">
+              ${this._mapEditMode ? "✏️ Done Editing" : "✏️ Edit Map"}
+            </button>
+          </div>
+        </div>
+
+        <div id="vfEditToolbar" class="vf-edit-toolbar" style="${this._mapEditMode ? "display:flex;" : "display:none;"}">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="vf-edit-badge">EDIT MODE</span>
+            <span class="vf-edit-hint">Drag walls to resize room • Drag sensor or beam to reposition • Drag/stretch zones</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button id="btnToggleSnap" class="btn-vf-snap" title="Toggle Grid Snapping">
+              🧲 Snap: ${this._mapSnapGrid ? this._mapSnapGrid + "mm" : "Off"}
+            </button>
+            <button id="btnSaveMapEdits" class="btn-primary" style="padding:5px 12px; font-size:0.8rem;">
+              💾 Save to ESP32
+            </button>
+            <button id="btnCancelMapEdits" class="btn-secondary" style="padding:5px 10px; font-size:0.8rem;">
+              ✕ Exit
+            </button>
+          </div>
+        </div>
+
         <!-- Interactive Live Viewfinder SVG (Visible on ALL tabs!) -->
-        <div class="mini-viewfinder">
+        <div class="mini-viewfinder ${this._mapEditMode ? "editing" : ""}" id="miniViewfinderBox">
           <svg id="viewfinderSvg" viewBox="-3000 -500 6000 6500" preserveAspectRatio="xMidYMid meet" style="width:100%; height:100%;">
             <defs>
               <radialGradient id="vfBeamGrad" cx="50%" cy="0%" r="100%">
@@ -3663,6 +3790,8 @@ class RadarCalibrationCard extends HTMLElement {
             <path id="vfBeamCone" fill="url(#vfBeamGrad)" opacity="0.8" />
             <g id="vfTargetsLayer"></g>
             <g id="vfSensorLayer"></g>
+            <g id="vfEditHandlesLayer"></g>
+            <g id="vfHudLayer"></g>
           </svg>
         </div>
 
@@ -3838,6 +3967,580 @@ class RadarCalibrationCard extends HTMLElement {
     this._updateViewfinder();
     this._lastLiveSig = null;
     this._updateLiveValues();
+  }
+
+  _clientToSvg(e) {
+    const svg = this.shadowRoot.getElementById("viewfinderSvg");
+    if (!svg) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    return pt.matrixTransform(ctm.inverse());
+  }
+
+  _snap(val, step = this._mapSnapGrid) {
+    if (!step || step <= 1) return Math.round(val);
+    return Math.round(val / step) * step;
+  }
+
+  _initEditSnapshot() {
+    const ent = this._entities;
+    const stableHass = radarStableHass(this._hass);
+    const states = stableHass.states;
+    const getVal = (id, def = 0) => {
+      if (!id || !states[id]) return def;
+      const v = parseFloat(states[id].state);
+      return Number.isFinite(v) ? v : def;
+    };
+    this._initialEditSnapshot = {
+      formState: Object.assign({}, this._formState),
+      zones: {}
+    };
+    for (let z = 1; z <= 10; z++) {
+      this._initialEditSnapshot.zones[z] = {
+        x1: getVal(ent[`zone${z}_x1`]),
+        y1: getVal(ent[`zone${z}_y1`]),
+        x2: getVal(ent[`zone${z}_x2`]),
+        y2: getVal(ent[`zone${z}_y2`]),
+        angle: getVal(ent[`zone${z}_angle`], 0)
+      };
+      if (!this._zoneEditCoords[z]) {
+        this._zoneEditCoords[z] = Object.assign({}, this._initialEditSnapshot.zones[z]);
+      }
+    }
+  }
+
+  _toggleMapEdit(forceState = null) {
+    this._mapEditMode = (forceState !== null) ? forceState : !this._mapEditMode;
+    if (this._mapEditMode) {
+      this._initEditSnapshot();
+      this._showToast("✏️ Map Edit Mode: Drag walls, sensor, or zones directly!");
+    } else {
+      this._activeDrag = null;
+    }
+    const btn = this.shadowRoot.getElementById("btnToggleMapEdit");
+    if (btn) {
+      btn.className = `btn-vf-edit ${this._mapEditMode ? "active" : ""}`;
+      btn.innerHTML = this._mapEditMode ? "✏️ Done Editing" : "✏️ Edit Map";
+    }
+    const toolbar = this.shadowRoot.getElementById("vfEditToolbar");
+    if (toolbar) {
+      toolbar.style.display = this._mapEditMode ? "flex" : "none";
+    }
+    const vfBox = this.shadowRoot.getElementById("miniViewfinderBox");
+    if (vfBox) {
+      vfBox.classList.toggle("editing", this._mapEditMode);
+    }
+    this._updateViewfinder();
+  }
+
+  async _saveMapEdits() {
+    if (!this._entities || !this._hass) return;
+    const ent = this._entities;
+    this._showToast("💾 Saving layout & zones to ESP32...");
+
+    const rw = this._formState.roomWidth || 4000;
+    const rd = this._formState.roomDepth || 5000;
+    const off = this._formState.sensorOffsetX || 0;
+    const yaw = this._formState.mountingYaw || 0;
+
+    // 1. Save Room Boundaries
+    if (ent.room_width) await this._setNumber(ent.room_width, rw);
+    if (ent.room_depth) await this._setNumber(ent.room_depth, rd);
+    if (ent.sensor_wall_offset_x) await this._setNumber(ent.sensor_wall_offset_x, off);
+    if (ent.mounting_angle) await this._setNumber(ent.mounting_angle, yaw);
+
+    if (ent.apply_room_dimensions_btn && this._hass.states[ent.apply_room_dimensions_btn]) {
+      this._pressButton(ent.apply_room_dimensions_btn);
+    } else {
+      const minX = -(rw * 0.5 + off);
+      const maxX = +(rw * 0.5 - off);
+      if (ent.room_min_x) await this._setNumber(ent.room_min_x, minX);
+      if (ent.room_max_x) await this._setNumber(ent.room_max_x, maxX);
+      if (ent.room_min_y) await this._setNumber(ent.room_min_y, 0);
+      if (ent.room_max_y) await this._setNumber(ent.room_max_y, rd);
+    }
+
+    // 2. Save modified zones
+    for (const z of this._modifiedZones) {
+      const c = this._zoneEditCoords[z];
+      if (c) {
+        if (ent[`zone${z}_x1`]) await this._setNumber(ent[`zone${z}_x1`], c.x1);
+        if (ent[`zone${z}_y1`]) await this._setNumber(ent[`zone${z}_y1`], c.y1);
+        if (ent[`zone${z}_x2`]) await this._setNumber(ent[`zone${z}_x2`], c.x2);
+        if (ent[`zone${z}_y2`]) await this._setNumber(ent[`zone${z}_y2`], c.y2);
+        if (ent[`zone${z}_angle`]) await this._setNumber(ent[`zone${z}_angle`], c.angle || 0);
+      }
+    }
+
+    this._modifiedZones.clear();
+    this._placementDirty = false;
+    this._zoneDirty = false;
+    this._showToast("⚡ Successfully flashed updated room layout and zones to ESP32!");
+    this._toggleMapEdit(false);
+  }
+
+  _cancelMapEdits() {
+    if (this._initialEditSnapshot) {
+      this._formState = Object.assign({}, this._initialEditSnapshot.formState);
+      this._zoneEditCoords = {};
+      for (const z in this._initialEditSnapshot.zones) {
+        this._zoneEditCoords[z] = Object.assign({}, this._initialEditSnapshot.zones[z]);
+      }
+      this._modifiedZones.clear();
+      const inpW = this.shadowRoot.getElementById("inpRoomWidth");
+      if (inpW) inpW.value = this._formState.roomWidth;
+      const inpD = this.shadowRoot.getElementById("inpRoomDepth");
+      if (inpD) inpD.value = this._formState.roomDepth;
+      const inpOff = this.shadowRoot.getElementById("inpWallOffsetX");
+      if (inpOff) inpOff.value = this._formState.sensorOffsetX;
+      const inpYaw = this.shadowRoot.getElementById("inpMountingYaw");
+      if (inpYaw) inpYaw.value = this._formState.mountingYaw;
+    }
+    this._toggleMapEdit(false);
+    this._showToast("Map edits discarded.");
+  }
+
+  _syncZoneInputsIfSelected(z) {
+    if (z === this._selectedZone) {
+      const c = this._zoneEditCoords[z];
+      if (!c) return;
+      const setInp = (id, val) => {
+        const el = this.shadowRoot.getElementById(id);
+        if (el) el.value = Math.round(val);
+      };
+      setInp("inpZone_x1", c.x1);
+      setInp("inpZone_y1", c.y1);
+      setInp("inpZone_x2", c.x2);
+      setInp("inpZone_y2", c.y2);
+      setInp("inpZone_angle", c.angle || 0);
+    }
+  }
+
+  _bindMapEditEvents() {
+    const btnToggle = this.shadowRoot.getElementById("btnToggleMapEdit");
+    if (btnToggle) {
+      btnToggle.addEventListener("click", () => this._toggleMapEdit());
+    }
+
+    const btnSnap = this.shadowRoot.getElementById("btnToggleSnap");
+    if (btnSnap) {
+      btnSnap.addEventListener("click", () => {
+        if (this._mapSnapGrid === 50) this._mapSnapGrid = 100;
+        else if (this._mapSnapGrid === 100) this._mapSnapGrid = 0;
+        else this._mapSnapGrid = 50;
+        btnSnap.textContent = `🧲 Snap: ${this._mapSnapGrid ? this._mapSnapGrid + "mm" : "Off"}`;
+        this._showToast(`Grid snap: ${this._mapSnapGrid ? this._mapSnapGrid + " mm" : "Disabled"}`);
+      });
+    }
+
+    const btnSave = this.shadowRoot.getElementById("btnSaveMapEdits");
+    if (btnSave) {
+      btnSave.addEventListener("click", () => this._saveMapEdits());
+    }
+
+    const btnCancel = this.shadowRoot.getElementById("btnCancelMapEdits");
+    if (btnCancel) {
+      btnCancel.addEventListener("click", () => this._cancelMapEdits());
+    }
+
+    const svg = this.shadowRoot.getElementById("viewfinderSvg");
+    if (!svg) return;
+
+    svg.addEventListener("pointerdown", (e) => {
+      if (!this._mapEditMode) return;
+      const handle = e.target.closest("[data-handle-type]");
+      if (!handle) return;
+
+      const type = handle.dataset.handleType;
+      const zone = handle.dataset.zone ? parseInt(handle.dataset.zone, 10) : null;
+      const corner = handle.dataset.corner !== undefined ? parseInt(handle.dataset.corner, 10) : null;
+
+      if (type === "zone-select") {
+        if (zone) {
+          this._selectedZone = zone;
+          this._setSelect(this._entities.zone_select, `Zone ${zone}`);
+          this._renderZoneCardsAndStepper();
+          this._updateViewfinder();
+        }
+        return;
+      }
+
+      handle.setPointerCapture(e.pointerId);
+      const svgPt = this._clientToSvg(e);
+
+      const startState = {
+        type,
+        pointerId: e.pointerId,
+        handle,
+        startSvgX: svgPt.x,
+        startSvgY: svgPt.y,
+        zone,
+        corner,
+        origRoomW: this._formState.roomWidth || 4000,
+        origRoomD: this._formState.roomDepth || 5000,
+        origOff: this._formState.sensorOffsetX || 0,
+        origYaw: this._formState.mountingYaw || 0,
+        origCoords: zone && this._zoneEditCoords[zone] ? Object.assign({}, this._zoneEditCoords[zone]) : null
+      };
+
+      if (zone) {
+        this._selectedZone = zone;
+      }
+
+      this._activeDrag = startState;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    svg.addEventListener("pointermove", (e) => {
+      if (!this._activeDrag || e.pointerId !== this._activeDrag.pointerId) return;
+      const drag = this._activeDrag;
+      const svgPt = this._clientToSvg(e);
+      const deltaX = svgPt.x - drag.startSvgX;
+      const deltaY = svgPt.y - drag.startSvgY;
+
+      const inpW = this.shadowRoot.getElementById("inpRoomWidth");
+      const inpD = this.shadowRoot.getElementById("inpRoomDepth");
+      const inpOff = this.shadowRoot.getElementById("inpWallOffsetX");
+      const inpYaw = this.shadowRoot.getElementById("inpMountingYaw");
+      const selPreset = this.shadowRoot.getElementById("selPlacementPreset");
+
+      switch (drag.type) {
+        case "wall-right": {
+          const newW = Math.max(1000, Math.min(10000, this._snap(drag.origRoomW + deltaX)));
+          this._formState.roomWidth = newW;
+          if (inpW) inpW.value = newW;
+          this._placementDirty = true;
+          break;
+        }
+        case "wall-bottom": {
+          const newD = Math.max(1000, Math.min(10000, this._snap(drag.origRoomD + deltaY)));
+          this._formState.roomDepth = newD;
+          if (inpD) inpD.value = newD;
+          this._placementDirty = true;
+          break;
+        }
+        case "corner-room": {
+          const newW = Math.max(1000, Math.min(10000, this._snap(drag.origRoomW + deltaX)));
+          const newD = Math.max(1000, Math.min(10000, this._snap(drag.origRoomD + deltaY)));
+          this._formState.roomWidth = newW;
+          this._formState.roomDepth = newD;
+          if (inpW) inpW.value = newW;
+          if (inpD) inpD.value = newD;
+          this._placementDirty = true;
+          break;
+        }
+        case "sensor-move": {
+          const rw = this._formState.roomWidth || 4000;
+          const maxOff = Math.round(rw / 2);
+          const newOff = Math.max(-maxOff, Math.min(maxOff, this._snap(drag.origOff + deltaX)));
+          this._formState.sensorOffsetX = newOff;
+          this._formState.preset = "custom";
+          if (inpOff) inpOff.value = newOff;
+          if (selPreset) selPreset.value = "custom";
+          this._placementDirty = true;
+          break;
+        }
+        case "sensor-yaw": {
+          const rw = this._formState.roomWidth || 4000;
+          const sx = (rw / 2) + (this._formState.sensorOffsetX || 0);
+          const dx = svgPt.x - sx;
+          const dy = svgPt.y;
+          const rawDeg = Math.round(Math.atan2(dy, dx) * 180 / Math.PI) - 90;
+          const deg = Math.max(-90, Math.min(90, Math.round(rawDeg / 5) * 5));
+          this._formState.mountingYaw = deg;
+          this._formState.preset = "custom";
+          if (inpYaw) inpYaw.value = deg;
+          if (selPreset) selPreset.value = "custom";
+          this._placementDirty = true;
+          break;
+        }
+        case "zone-body": {
+          const z = drag.zone;
+          const orig = drag.origCoords;
+          if (!z || !orig) break;
+          const sDeltaX = this._snap(deltaX);
+          const sDeltaY = this._snap(deltaY);
+          this._zoneEditCoords[z] = {
+            x1: orig.x1 + sDeltaX,
+            y1: orig.y1 + sDeltaY,
+            x2: orig.x2 + sDeltaX,
+            y2: orig.y2 + sDeltaY,
+            angle: orig.angle || 0
+          };
+          this._syncZoneInputsIfSelected(z);
+          this._modifiedZones.add(z);
+          this._zoneDirty = true;
+          break;
+        }
+        case "zone-corner": {
+          const z = drag.zone;
+          const orig = drag.origCoords;
+          if (!z || !orig) break;
+          const rw = this._formState.roomWidth || 4000;
+          const sx = (rw / 2) + (this._formState.sensorOffsetX || 0);
+          const minX = Math.min(orig.x1, orig.x2);
+          const maxX = Math.max(orig.x1, orig.x2);
+          const minY = Math.min(orig.y1, orig.y2);
+          const maxY = Math.max(orig.y1, orig.y2);
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
+          const csx = sx + cx;
+          const csy = cy;
+
+          // Un-rotate delta
+          const rad = ((orig.angle || 0) * Math.PI) / 180;
+          const dx = svgPt.x - csx;
+          const dy = svgPt.y - csy;
+          const unrotX = this._snap(dx * Math.cos(-rad) - dy * Math.sin(-rad));
+          const unrotY = this._snap(dx * Math.sin(-rad) + dy * Math.cos(-rad));
+
+          let nMinX = minX, nMaxX = maxX, nMinY = minY, nMaxY = maxY;
+          if (drag.corner === 0) {
+            nMinX = Math.min(maxX - 200, cx + unrotX);
+            nMinY = Math.min(maxY - 200, cy + unrotY);
+          } else if (drag.corner === 1) {
+            nMaxX = Math.max(minX + 200, cx + unrotX);
+            nMinY = Math.min(maxY - 200, cy + unrotY);
+          } else if (drag.corner === 2) {
+            nMaxX = Math.max(minX + 200, cx + unrotX);
+            nMaxY = Math.max(minY + 200, cy + unrotY);
+          } else if (drag.corner === 3) {
+            nMinX = Math.min(maxX - 200, cx + unrotX);
+            nMaxY = Math.max(minY + 200, cy + unrotY);
+          }
+
+          this._zoneEditCoords[z] = {
+            x1: nMinX,
+            y1: nMinY,
+            x2: nMaxX,
+            y2: nMaxY,
+            angle: orig.angle || 0
+          };
+          this._syncZoneInputsIfSelected(z);
+          this._modifiedZones.add(z);
+          this._zoneDirty = true;
+          break;
+        }
+        case "zone-rotate": {
+          const z = drag.zone;
+          const orig = drag.origCoords;
+          if (!z || !orig) break;
+          const rw = this._formState.roomWidth || 4000;
+          const sx = (rw / 2) + (this._formState.sensorOffsetX || 0);
+          const minX = Math.min(orig.x1, orig.x2);
+          const maxX = Math.max(orig.x1, orig.x2);
+          const minY = Math.min(orig.y1, orig.y2);
+          const maxY = Math.max(orig.y1, orig.y2);
+          const csx = sx + (minX + maxX) / 2;
+          const csy = (minY + maxY) / 2;
+
+          const dx = svgPt.x - csx;
+          const dy = svgPt.y - csy;
+          const rawDeg = Math.round(Math.atan2(dy, dx) * 180 / Math.PI) + 90;
+          let deg = rawDeg;
+          while (deg > 180) deg -= 360;
+          while (deg < -180) deg += 360;
+          deg = Math.round(deg / 5) * 5;
+
+          this._zoneEditCoords[z] = {
+            x1: orig.x1,
+            y1: orig.y1,
+            x2: orig.x2,
+            y2: orig.y2,
+            angle: deg
+          };
+          this._syncZoneInputsIfSelected(z);
+          this._modifiedZones.add(z);
+          this._zoneDirty = true;
+          break;
+        }
+      }
+
+      this._updateViewfinder();
+    });
+
+    const endDrag = (e) => {
+      if (this._activeDrag && e.pointerId === this._activeDrag.pointerId) {
+        try {
+          if (this._activeDrag.handle && this._activeDrag.handle.releasePointerCapture) {
+            this._activeDrag.handle.releasePointerCapture(e.pointerId);
+          }
+        } catch (_) {}
+        this._activeDrag = null;
+        this._updateViewfinder();
+      }
+    };
+
+    svg.addEventListener("pointerup", endDrag);
+    svg.addEventListener("pointercancel", endDrag);
+  }
+
+  _renderEditHandles(previewGeom) {
+    if (!this._mapEditMode) return "";
+    const rw = previewGeom.roomWidth;
+    const rd = previewGeom.roomDepth;
+    const sx = previewGeom.sx;
+    const sy = previewGeom.sy;
+    const yaw = previewGeom.angle || 0;
+
+    let hHtml = "";
+
+    // 1. Right Wall Handle
+    hHtml += `
+      <g class="vf-handle" data-handle-type="wall-right">
+        <line x1="${rw}" y1="0" x2="${rw}" y2="${rd}" stroke="#38bdf8" stroke-width="26" opacity="0.45" stroke-dasharray="40,25" class="vf-handle vf-handle-wall" data-handle-type="wall-right" />
+        <g transform="translate(${rw}, ${rd / 2})" class="vf-handle vf-handle-wall" data-handle-type="wall-right">
+          <rect x="-45" y="-90" width="90" height="180" rx="45" fill="#38bdf8" stroke="#0f172a" stroke-width="12" />
+          <text x="0" y="22" fill="#0f172a" font-size="95" font-weight="900" text-anchor="middle" pointer-events="none">↔</text>
+        </g>
+      </g>
+    `;
+
+    // 2. Bottom Wall Handle
+    hHtml += `
+      <g class="vf-handle" data-handle-type="wall-bottom">
+        <line x1="0" y1="${rd}" x2="${rw}" y2="${rd}" stroke="#38bdf8" stroke-width="26" opacity="0.45" stroke-dasharray="40,25" class="vf-handle vf-handle-wall-ns" data-handle-type="wall-bottom" />
+        <g transform="translate(${rw / 2}, ${rd})" class="vf-handle vf-handle-wall-ns" data-handle-type="wall-bottom">
+          <rect x="-90" y="-45" width="180" height="90" rx="45" fill="#38bdf8" stroke="#0f172a" stroke-width="12" />
+          <text x="0" y="28" fill="#0f172a" font-size="95" font-weight="900" text-anchor="middle" pointer-events="none">↕</text>
+        </g>
+      </g>
+    `;
+
+    // 3. Corner Handle
+    hHtml += `
+      <g class="vf-handle vf-handle-corner" data-handle-type="corner-room" transform="translate(${rw}, ${rd})">
+        <circle cx="0" cy="0" r="75" fill="#38bdf8" stroke="#0f172a" stroke-width="14" />
+        <text x="0" y="24" fill="#0f172a" font-size="85" font-weight="900" text-anchor="middle" pointer-events="none">⤡</text>
+      </g>
+    `;
+
+    // 4. Sensor Slide Halo & Yaw Handle
+    hHtml += `
+      <g class="vf-handle vf-handle-sensor" data-handle-type="sensor-move">
+        <circle cx="${sx}" cy="${sy}" r="180" fill="rgba(56, 189, 248, 0.2)" stroke="#38bdf8" stroke-width="16" stroke-dasharray="30,20" class="vf-handle vf-handle-sensor" data-handle-type="sensor-move" />
+        <text x="${sx}" y="${sy + 260}" fill="#38bdf8" font-size="110" font-weight="800" text-anchor="middle" pointer-events="none">↔ SLIDE</text>
+      </g>
+    `;
+
+    const rad = ((yaw + 90) * Math.PI) / 180;
+    const hx = sx + 900 * Math.cos(rad);
+    const hy = sy + 900 * Math.sin(rad);
+    hHtml += `
+      <g class="vf-handle">
+        <line x1="${sx}" y1="${sy}" x2="${hx}" y2="${hy}" stroke="#f59e0b" stroke-width="14" stroke-dasharray="25,15" pointer-events="none" />
+        <g class="vf-handle vf-handle-yaw" data-handle-type="sensor-yaw" transform="translate(${hx}, ${hy})">
+          <circle cx="0" cy="0" r="75" fill="#f59e0b" stroke="#0f172a" stroke-width="14" />
+          <text x="0" y="24" fill="#0f172a" font-size="85" font-weight="900" text-anchor="middle" pointer-events="none">↻</text>
+        </g>
+      </g>
+    `;
+
+    // 5. Zone Handles for Selected Zone
+    const ent = this._entities;
+    const stableHass = radarStableHass(this._hass);
+    const activeZonesList = RadarEntityResolver.getActiveZones(stableHass, ent, this._locallyEnabledZones);
+
+    for (const z of activeZonesList) {
+      const isSel = z === this._selectedZone;
+      let c = this._zoneEditCoords[z];
+      if (!c) {
+        const states = stableHass.states;
+        const getV = (id, def = 0) => {
+          if (!id || !states[id]) return def;
+          const v = parseFloat(states[id].state);
+          return Number.isFinite(v) ? v : def;
+        };
+        c = {
+          x1: getV(ent[`zone${z}_x1`]),
+          y1: getV(ent[`zone${z}_y1`]),
+          x2: getV(ent[`zone${z}_x2`]),
+          y2: getV(ent[`zone${z}_y2`]),
+          angle: getV(ent[`zone${z}_angle`], 0)
+        };
+      }
+
+      if (c.x1 === 0 && c.x2 === 0 && c.y1 === 0 && c.y2 === 0) continue;
+      const corners = RoomGeometry.transformZonePolygon(c.x1, c.y1, c.x2, c.y2, c.angle || 0, previewGeom);
+      const pts = corners.map(p => `${p.x},${p.y}`).join(" ");
+
+      if (!isSel) {
+        hHtml += `
+          <polygon points="${pts}" fill="rgba(255, 255, 255, 0.01)" stroke="#38bdf8" stroke-width="8" stroke-dasharray="20,15" class="vf-handle" data-handle-type="zone-select" data-zone="${z}" style="cursor:pointer;" />
+        `;
+      } else {
+        hHtml += `
+          <polygon points="${pts}" fill="rgba(245, 158, 11, 0.15)" stroke="#f59e0b" stroke-width="14" class="vf-handle vf-handle-zone-body" data-handle-type="zone-body" data-zone="${z}" />
+        `;
+
+        for (let i = 0; i < 4; i++) {
+          hHtml += `
+            <circle cx="${corners[i].x}" cy="${corners[i].y}" r="65" fill="#f59e0b" stroke="#fff" stroke-width="12" class="vf-handle vf-handle-zone-corner" data-handle-type="zone-corner" data-zone="${z}" data-corner="${i}" />
+          `;
+        }
+
+        const topMid = { x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2 };
+        const normAngle = ((c.angle || 0) - 90) * Math.PI / 180;
+        const rx = topMid.x + 280 * Math.cos(normAngle);
+        const ry = topMid.y + 280 * Math.sin(normAngle);
+        hHtml += `
+          <line x1="${topMid.x}" y1="${topMid.y}" x2="${rx}" y2="${ry}" stroke="#f59e0b" stroke-width="12" stroke-dasharray="20,15" pointer-events="none" />
+          <g class="vf-handle vf-handle-zone-rotate" data-handle-type="zone-rotate" data-zone="${z}" transform="translate(${rx}, ${ry})">
+            <circle cx="0" cy="0" r="60" fill="#f59e0b" stroke="#0f172a" stroke-width="12" />
+            <text x="0" y="20" fill="#0f172a" font-size="70" font-weight="900" text-anchor="middle" pointer-events="none">↻</text>
+          </g>
+        `;
+      }
+    }
+
+    return hHtml;
+  }
+
+  _renderHud() {
+    if (!this._activeDrag) return "";
+    const drag = this._activeDrag;
+    let text = "";
+    let hx = 0, hy = 0;
+
+    if (drag.type.startsWith("wall-") || drag.type === "corner-room") {
+      const rw = this._formState.roomWidth || 4000;
+      const rd = this._formState.roomDepth || 5000;
+      text = `Room: ${Math.round(rw)} × ${Math.round(rd)} mm`;
+      hx = rw / 2;
+      hy = rd / 2;
+    } else if (drag.type === "sensor-move" || drag.type === "sensor-yaw") {
+      const rw = this._formState.roomWidth || 4000;
+      const off = this._formState.sensorOffsetX || 0;
+      const yaw = this._formState.mountingYaw || 0;
+      text = `Offset X: ${Math.round(off)} mm | Yaw: ${Math.round(yaw)}°`;
+      hx = (rw / 2) + off;
+      hy = 350;
+    } else if (drag.type.startsWith("zone-")) {
+      const z = drag.zone;
+      const c = this._zoneEditCoords[z];
+      if (c) {
+        const w = Math.abs(c.x2 - c.x1);
+        const d = Math.abs(c.y2 - c.y1);
+        text = `Zone ${z}: ${Math.round(w)} × ${Math.round(d)} mm (Angle: ${c.angle || 0}°)`;
+        const rw = this._formState.roomWidth || 4000;
+        const sx = (rw / 2) + (this._formState.sensorOffsetX || 0);
+        hx = sx + (c.x1 + c.x2) / 2;
+        hy = Math.max(200, (c.y1 + c.y2) / 2 - 200);
+      }
+    }
+
+    if (!text) return "";
+    const boxW = Math.max(600, text.length * 42);
+    return `
+      <g pointer-events="none">
+        <rect x="${hx - boxW / 2}" y="${hy - 65}" width="${boxW}" height="120" rx="20" fill="rgba(15, 23, 42, 0.95)" stroke="#38bdf8" stroke-width="10" />
+        <text x="${hx}" y="${hy + 15}" fill="#38bdf8" font-size="95" font-weight="900" text-anchor="middle" dominant-baseline="middle">${text}</text>
+      </g>
+    `;
   }
 
   _bindEvents() {
@@ -4165,6 +4868,8 @@ class RadarCalibrationCard extends HTMLElement {
         }
       });
     }
+
+    this._bindMapEditEvents();
   }
 
   // Updates the SVG Viewfinder graphics instantly based on current formState!
@@ -4265,8 +4970,13 @@ class RadarCalibrationCard extends HTMLElement {
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
         const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
 
-        // Preview unsaved manual input edits only when the user has modified the inputs (_zoneDirty)
-        if (z === this._selectedZone && this._zoneDirty) {
+        if (this._zoneEditCoords && this._zoneEditCoords[z]) {
+          x1 = this._zoneEditCoords[z].x1;
+          y1 = this._zoneEditCoords[z].y1;
+          x2 = this._zoneEditCoords[z].x2;
+          y2 = this._zoneEditCoords[z].y2;
+          zAngle = this._zoneEditCoords[z].angle || 0;
+        } else if (z === this._selectedZone && this._zoneDirty) {
           const inX1 = this.shadowRoot.getElementById("inpZone_x1");
           const inY1 = this.shadowRoot.getElementById("inpZone_y1");
           const inX2 = this.shadowRoot.getElementById("inpZone_x2");
@@ -4328,6 +5038,16 @@ class RadarCalibrationCard extends HTMLElement {
 
     // 5. Update Targets
     this._updateVfTargets(previewGeom);
+
+    // 6. Interactive Map Edit Handles & Live HUD
+    const vfHandles = this.shadowRoot.getElementById("vfEditHandlesLayer");
+    if (vfHandles) {
+      radarSetHtml(vfHandles, this._renderEditHandles(previewGeom));
+    }
+    const vfHud = this.shadowRoot.getElementById("vfHudLayer");
+    if (vfHud) {
+      radarSetHtml(vfHud, this._renderHud());
+    }
   }
 
   // Live targets projected using current preview geometry
@@ -4375,7 +5095,7 @@ class RadarCalibrationCard extends HTMLElement {
     const states = this._hass.states;
     let sig = [
       RadarEntityResolver._registryVersion, this._activeTab, this._selectedZone,
-      this._zonePending ? 1 : 0, Array.from(this._locallyEnabledZones || []).join(",")
+      this._zonePending ? 1 : 0, this._mapEditMode ? 1 : 0, Array.from(this._locallyEnabledZones || []).join(",")
     ].join("|") + "|";
     for (const id of this._watchIds) {
       const s = states[id];
@@ -4407,7 +5127,7 @@ class RadarCalibrationCard extends HTMLElement {
     RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", stableHass, ent, this._selectedDevice, this);
 
     // Pick up room geometry changes from the ESP32 (or values that arrived after a reconnect)
-    if (!this._placementDirty && this._roomSig() !== this._lastRoomSig) {
+    if (!this._mapEditMode && !this._placementDirty && this._roomSig() !== this._lastRoomSig) {
       this._syncPlacementFromEntities();
     }
 
