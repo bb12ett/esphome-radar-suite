@@ -76,6 +76,10 @@ title: Radar Calibration & Setup
 
 If no radar sensors are detected yet, both cards automatically display an empty onboarding card with a **`⚡ Quick Setup Guide & YAML Generator`** button:
 
+<p align="center">
+  <img src="images/wizard.png" alt="ESPHome mmWave Radar Suite 1-Minute Setup Wizard" width="460" />
+</p>
+
 1. Click **`⚡ Quick Setup Guide & YAML Generator`** on either card (or select **`➕ Add New Sensor...`** from the device dropdown at any time).
 2. Fill out the 3 fields in the wizard dialog:
    * **Sensor Friendly Name**: e.g., `Living Room Presence` (the wizard automatically creates `node_name: living-room-presence`).

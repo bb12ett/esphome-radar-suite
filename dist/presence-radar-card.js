@@ -373,14 +373,15 @@ class RadarEntityResolver {
     return Boolean(states[occId] && states[occId].state !== "unavailable");
   }
 
-  static isZoneActive(hass, entities, z) {
+  static isZoneActive(hass, entities, z, locallyEnabled = null) {
+    if (locallyEnabled && locallyEnabled.has(z)) return true;
     return this.isZoneConfigured(hass, entities, z) || this.isZoneEnabled(hass, entities, z);
   }
 
-  static getActiveZones(hass, entities) {
+  static getActiveZones(hass, entities, locallyEnabled = null) {
     const list = [];
     for (let z = 1; z <= 10; z++) {
-      if (this.isZoneActive(hass, entities, z)) {
+      if (this.isZoneActive(hass, entities, z, locallyEnabled)) {
         list.push(z);
       }
     }
@@ -420,36 +421,48 @@ class RadarVisibilityManager {
   }
 
   static async enableZone(hass, entities, z) {
-    if (!hass || !hass.callWS || !entities) return;
+    if (!hass || !entities) return;
     const ents = this.getZoneEntities(entities, z);
     for (const entityId of ents) {
-      try {
-        await hass.callWS({
-          type: "config/entity_registry/update",
-          entity_id: entityId,
-          disabled_by: null,
-          hidden_by: null
-        });
-      } catch (e) {}
+      if (hass.entities && hass.entities[entityId]) {
+        hass.entities[entityId].disabled = false;
+        hass.entities[entityId].disabled_by = null;
+      }
+      if (hass.callWS) {
+        try {
+          await hass.callWS({
+            type: "config/entity_registry/update",
+            entity_id: entityId,
+            disabled_by: null,
+            hidden_by: null
+          });
+        } catch (e) {}
+      }
     }
   }
 
   static async disableZone(hass, entities, z) {
-    if (!hass || !hass.callWS || !entities) return;
+    if (!hass || !entities) return;
     const ents = this.getZoneEntities(entities, z);
     for (const entityId of ents) {
-      try {
-        await hass.callWS({
-          type: "config/entity_registry/update",
-          entity_id: entityId,
-          disabled_by: "user",
-          hidden_by: null
-        });
-      } catch (e) {}
+      if (hass.entities && hass.entities[entityId]) {
+        hass.entities[entityId].disabled = true;
+        hass.entities[entityId].disabled_by = "user";
+      }
+      if (hass.callWS) {
+        try {
+          await hass.callWS({
+            type: "config/entity_registry/update",
+            entity_id: entityId,
+            disabled_by: "user",
+            hidden_by: null
+          });
+        } catch (e) {}
+      }
     }
   }
 
-  static async sync(hass, entities, selectedDevice) {
+  static async sync(hass, entities, selectedDevice, locallyEnabled = null) {
     if (!hass || !hass.callWS || !entities) return;
     const devKey = selectedDevice || "default";
     const cacheKey = `${devKey}_sync_disabled`;
@@ -457,6 +470,7 @@ class RadarVisibilityManager {
     this._synced[cacheKey] = true;
 
     for (let z = 1; z <= 10; z++) {
+      if (locallyEnabled && locallyEnabled.has(z)) continue;
       const isConfigured = RadarEntityResolver.isZoneConfigured(hass, entities, z);
       const isEnabled = RadarEntityResolver.isZoneEnabled(hass, entities, z);
       const shouldBeDisabled = !isConfigured && !isEnabled;
@@ -1917,6 +1931,7 @@ class RadarMapCard extends HTMLElement {
           return;
         }
         this._selectedDevice = e.target.value;
+        this._locallyEnabledZones = new Set();
         this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
         window.dispatchEvent(new CustomEvent("radar-device-selected", {
           detail: { device: this._selectedDevice }
@@ -2352,6 +2367,7 @@ class RadarCalibrationCard extends HTMLElement {
     this._selectedDevice = "";
     this._activeTab = "placement";
     this._selectedZone = 1;
+    this._locallyEnabledZones = new Set();
     this._zoneDirty = false;
     this._lastSyncedZoneSig = "";
     this._toastMsg = "";
@@ -3530,6 +3546,7 @@ class RadarCalibrationCard extends HTMLElement {
           return;
         }
         this._selectedDevice = e.target.value;
+        this._locallyEnabledZones = new Set();
         this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
         window.dispatchEvent(new CustomEvent("radar-device-selected", {
           detail: { device: this._selectedDevice }
@@ -4094,11 +4111,12 @@ class RadarCalibrationCard extends HTMLElement {
 
   async _enableZone(z) {
     if (!this._entities || !this._hass) return;
+    if (!this._locallyEnabledZones) this._locallyEnabledZones = new Set();
+    this._locallyEnabledZones.add(z);
     await RadarVisibilityManager.enableZone(this._hass, this._entities, z);
     this._selectedZone = z;
     this._setSelect(this._entities.zone_select, `Zone ${z}`);
     this._showToast(`Zone ${z} enabled. Configure coordinates below.`);
-    RadarVisibilityManager.clearCache(this._selectedDevice);
     this._renderZoneCardsAndStepper();
     this._updateViewfinder();
   }
@@ -4107,15 +4125,15 @@ class RadarCalibrationCard extends HTMLElement {
     if (!this._entities || !this._hass) return;
     const ent = this._entities;
     if (confirm(`Disable Zone ${z}? Its coordinates will be reset to 0 and entities will be disabled in Home Assistant.`)) {
+      if (this._locallyEnabledZones) this._locallyEnabledZones.delete(z);
       this._setNumber(ent[`zone${z}_x1`], 0);
       this._setNumber(ent[`zone${z}_y1`], 0);
       this._setNumber(ent[`zone${z}_x2`], 0);
       this._setNumber(ent[`zone${z}_y2`], 0);
       this._setNumber(ent[`zone${z}_angle`], 0);
       await RadarVisibilityManager.disableZone(this._hass, this._entities, z);
-      RadarVisibilityManager.clearCache(this._selectedDevice);
       this._showToast(`Zone ${z} disabled and coordinates cleared.`);
-      const remaining = RadarEntityResolver.getActiveZones(this._hass, this._entities).filter(n => n !== z);
+      const remaining = RadarEntityResolver.getActiveZones(this._hass, this._entities, this._locallyEnabledZones).filter(n => n !== z);
       this._selectedZone = remaining.length > 0 ? remaining[0] : 1;
       this._renderZoneCardsAndStepper();
       this._updateViewfinder();
@@ -4129,8 +4147,9 @@ class RadarCalibrationCard extends HTMLElement {
     const ent = this._entities;
     const states = this._hass.states;
 
+    if (!this._locallyEnabledZones) this._locallyEnabledZones = new Set();
     // Automatic Entity Visibility Sync in HA (silent background check)
-    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice);
+    RadarVisibilityManager.sync(this._hass, ent, this._selectedDevice, this._locallyEnabledZones);
 
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
@@ -4139,7 +4158,7 @@ class RadarCalibrationCard extends HTMLElement {
     };
     const getState = (id, def = "off") => (id && states[id]) ? states[id].state : def;
 
-    const activeList = RadarEntityResolver.getActiveZones(this._hass, ent);
+    const activeList = RadarEntityResolver.getActiveZones(this._hass, ent, this._locallyEnabledZones);
 
     const toolbar = this.shadowRoot.getElementById("zonesToolbar");
     if (toolbar) {
