@@ -48,6 +48,27 @@ console.info(
 // UTILITY: Robust Dynamic Entity Discovery & Fuzzy Resolution
 // ====================================================================
 class RadarEntityResolver {
+  static _registryCache = null;
+  static _registryMap = null;
+  static _fetchingRegistry = false;
+
+  static async loadEntityRegistry(hass) {
+    if (this._registryCache || !hass || !hass.callWS) return;
+    if (this._fetchingRegistry) return;
+    this._fetchingRegistry = true;
+    try {
+      const list = await hass.callWS({ type: "config/entity_registry/list" });
+      if (Array.isArray(list)) {
+        this._registryCache = list.map(e => e.entity_id);
+        this._registryMap = new Map(list.map(e => [e.entity_id, e]));
+      }
+    } catch (e) {
+      // Non-admin or unsupported
+    } finally {
+      this._fetchingRegistry = false;
+    }
+  }
+
   static getDevices(hass) {
     if (!hass || !hass.states) return [];
     const devices = new Map();
@@ -108,14 +129,28 @@ class RadarEntityResolver {
     const canonicalPrefix = matchedDev ? matchedDev.prefix : prefix;
     const rawPrefix = matchedDev ? matchedDev.rawPrefix : prefix;
 
+    const registryList = RadarEntityResolver._registryCache || [];
     const entityRegistryKeys = (hass && hass.entities) ? Object.keys(hass.entities) : [];
-    const allEntityIds = Array.from(new Set([...Object.keys(states), ...entityRegistryKeys]));
+    const allEntityIds = Array.from(new Set([...Object.keys(states), ...entityRegistryKeys, ...registryList]));
     const tokens = canonicalPrefix.toLowerCase().split(/[_-\s]+/).filter(Boolean);
     const otherDevicePrefixes = new Set();
     for (const d of devs) {
       if (d.prefix !== canonicalPrefix && d.rawPrefix !== rawPrefix) {
         otherDevicePrefixes.add(d.prefix);
         otherDevicePrefixes.add(d.rawPrefix);
+      }
+    }
+
+    // Infer zonePrefix from existing zone config entities (e.g. handles double-area prefixes like living_room_living_room_presence)
+    let zonePrefix = rawPrefix;
+    const sampleCal = Object.keys(states).find(id => id.startsWith("select.") && id.endsWith("_zone_to_calibrate") && tokens.every(t => id.includes(t))) ||
+                      Object.keys(states).find(id => id.startsWith("button.") && id.endsWith("_set_zone_corner_1") && tokens.every(t => id.includes(t))) ||
+                      Object.keys(states).find(id => id.startsWith("number.") && id.endsWith("_zone_off_delay") && tokens.every(t => id.includes(t)));
+    if (sampleCal) {
+      const domainEnd = sampleCal.indexOf(".");
+      const suffixIdx = sampleCal.indexOf("_zone_");
+      if (domainEnd !== -1 && suffixIdx !== -1) {
+        zonePrefix = sampleCal.slice(domainEnd + 1, suffixIdx);
       }
     }
 
@@ -131,8 +166,9 @@ class RadarEntityResolver {
     };
 
     const findEntity = (domain, key, fallbackPrefix = canonicalPrefix) => {
-      // 1. Direct match with rawPrefix (handles HA double-area prefixes) and canonicalPrefix
-      const exact = findDirect(domain, key, fallbackPrefix);
+      const pref = key.startsWith("zone_") ? zonePrefix : fallbackPrefix;
+      // 1. Direct match with pref, rawPrefix, and canonicalPrefix
+      const exact = findDirect(domain, key, pref) || findDirect(domain, key, rawPrefix) || findDirect(domain, key, canonicalPrefix);
       if (exact) return exact;
 
       // 2. Token match where ALL device tokens exist as whole tokens in entity prefix,
@@ -155,7 +191,7 @@ class RadarEntityResolver {
         }
       }
 
-      return domain + "." + fallbackPrefix + "_" + key;
+      return domain + "." + pref + "_" + key;
     };
 
     const findFirstExisting = (domain, keys) => {
@@ -366,6 +402,10 @@ class RadarEntityResolver {
     if (!entities) return false;
     const occId = entities[`zone${z}_occupancy`];
     if (!occId) return false;
+    if (this._registryMap && this._registryMap.has(occId)) {
+      const reg = this._registryMap.get(occId);
+      return !reg.disabled_by;
+    }
     if (hass && hass.entities && hass.entities[occId]) {
       return !hass.entities[occId].disabled;
     }
@@ -423,7 +463,16 @@ class RadarVisibilityManager {
   static async enableZone(hass, entities, z) {
     if (!hass || !entities) return;
     const ents = this.getZoneEntities(entities, z);
+    let configEntryId = null;
+
     for (const entityId of ents) {
+      if (RadarEntityResolver._registryMap && RadarEntityResolver._registryMap.has(entityId)) {
+        const item = RadarEntityResolver._registryMap.get(entityId);
+        item.disabled_by = null;
+        if (!configEntryId && item.config_entry_id) {
+          configEntryId = item.config_entry_id;
+        }
+      }
       if (hass.entities && hass.entities[entityId]) {
         hass.entities[entityId].disabled = false;
         hass.entities[entityId].disabled_by = null;
@@ -433,10 +482,30 @@ class RadarVisibilityManager {
           await hass.callWS({
             type: "config/entity_registry/update",
             entity_id: entityId,
-            disabled_by: null,
-            hidden_by: null
+            disabled_by: null
           });
+        } catch (e) {
+          console.warn("Failed to enable zone entity in registry:", entityId, e);
+        }
+      }
+    }
+
+    // Reload integration config entry so ESPHome initializes the newly enabled entities in HA
+    if (hass.callService) {
+      if (configEntryId) {
+        try {
+          await hass.callService("homeassistant", "reload_config_entry", { entry_id: configEntryId });
         } catch (e) {}
+      }
+      const targetEntity = entities.target1_x || ents[0];
+      if (targetEntity) {
+        try {
+          await hass.callService("homeassistant", "reload_config_entry", {}, { entity_id: targetEntity });
+        } catch (e) {
+          try {
+            await hass.callService("homeassistant", "reload_config_entry", { entity_id: targetEntity });
+          } catch (e2) {}
+        }
       }
     }
   }
@@ -444,7 +513,16 @@ class RadarVisibilityManager {
   static async disableZone(hass, entities, z) {
     if (!hass || !entities) return;
     const ents = this.getZoneEntities(entities, z);
+    let configEntryId = null;
+
     for (const entityId of ents) {
+      if (RadarEntityResolver._registryMap && RadarEntityResolver._registryMap.has(entityId)) {
+        const item = RadarEntityResolver._registryMap.get(entityId);
+        item.disabled_by = "user";
+        if (!configEntryId && item.config_entry_id) {
+          configEntryId = item.config_entry_id;
+        }
+      }
       if (hass.entities && hass.entities[entityId]) {
         hass.entities[entityId].disabled = true;
         hass.entities[entityId].disabled_by = "user";
@@ -454,47 +532,33 @@ class RadarVisibilityManager {
           await hass.callWS({
             type: "config/entity_registry/update",
             entity_id: entityId,
-            disabled_by: "user",
-            hidden_by: null
+            disabled_by: "user"
           });
+        } catch (e) {
+          console.warn("Failed to disable zone entity in registry:", entityId, e);
+        }
+      }
+    }
+
+    // Reload integration config entry
+    if (hass.callService) {
+      if (configEntryId) {
+        try {
+          await hass.callService("homeassistant", "reload_config_entry", { entry_id: configEntryId });
+        } catch (e) {}
+      }
+      const targetEntity = entities.target1_x || ents[0];
+      if (targetEntity) {
+        try {
+          await hass.callService("homeassistant", "reload_config_entry", {}, { entity_id: targetEntity });
         } catch (e) {}
       }
     }
   }
 
   static async sync(hass, entities, selectedDevice, locallyEnabled = null) {
-    if (!hass || !hass.callWS || !entities) return;
-    const devKey = selectedDevice || "default";
-    const cacheKey = `${devKey}_sync_disabled`;
-    if (this._synced[cacheKey]) return;
-    this._synced[cacheKey] = true;
-
-    for (let z = 1; z <= 10; z++) {
-      if (locallyEnabled && locallyEnabled.has(z)) continue;
-      const isConfigured = RadarEntityResolver.isZoneConfigured(hass, entities, z);
-      const isEnabled = RadarEntityResolver.isZoneEnabled(hass, entities, z);
-      const shouldBeDisabled = !isConfigured && !isEnabled;
-      const ents = this.getZoneEntities(entities, z);
-
-      for (const entityId of ents) {
-        const entMeta = hass.entities ? hass.entities[entityId] : null;
-        const currentDisabled = entMeta ? Boolean(entMeta.disabled) : false;
-        const currentHidden = entMeta ? Boolean(entMeta.hidden) : false;
-
-        // Clean up any old hidden_by flags so (Hidden) disappears from device screen
-        // And ensure unconfigured zones are disabled_by: "user"
-        if (currentHidden || (shouldBeDisabled && !currentDisabled)) {
-          try {
-            await hass.callWS({
-              type: "config/entity_registry/update",
-              entity_id: entityId,
-              disabled_by: shouldBeDisabled ? "user" : null,
-              hidden_by: null
-            });
-          } catch (e) {}
-        }
-      }
-    }
+    // Automatic background sync should never disable zones.
+    // Zones are disabled only by user action or by default firmware state.
   }
 }
 
@@ -1314,6 +1378,7 @@ class RadarMapCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    RadarEntityResolver.loadEntityRegistry(hass);
 
     if (!this._selectedDevice) {
       if (this._config && this._config.device) {
@@ -2431,6 +2496,7 @@ class RadarCalibrationCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    RadarEntityResolver.loadEntityRegistry(hass);
 
     if (!this._selectedDevice) {
       if (this._config && this._config.device) {
@@ -3555,6 +3621,7 @@ class RadarCalibrationCard extends HTMLElement {
         this._updateViewfinder();
         this._showToast(`Switched to ${e.target.options[e.target.selectedIndex].text}`);
         this._updateLiveValues();
+        this._renderZoneCardsAndStepper();
       });
     }
 
