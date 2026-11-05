@@ -5209,9 +5209,43 @@ class RadarCalibrationCard extends HTMLElement {
       this._locallyEnabledZones.add(z);
       this._selectedZone = z;
       this._setSelect(this._entities.zone_select, `Zone ${z}`);
+
+      // Calculate room-central default coordinates (box centered in room space)
+      const rw = this._formState.roomWidth || 4000;
+      const rd = this._formState.roomDepth || 5000;
+      const off = this._formState.sensorOffsetX || 0;
+
+      // Default box: 1200 mm wide x 1000 mm deep centered in room
+      const boxW = Math.min(1400, Math.max(800, Math.round(rw * 0.35)));
+      const boxD = Math.min(1200, Math.max(800, Math.round(rd * 0.25)));
+      const sensorCenterX = -off;
+      const sensorCenterY = Math.max(boxD / 2 + 200, Math.round(rd * 0.45));
+
+      const defX1 = Math.round((sensorCenterX - boxW / 2) / 50) * 50;
+      const defX2 = Math.round((sensorCenterX + boxW / 2) / 50) * 50;
+      const defY1 = Math.round((sensorCenterY - boxD / 2) / 50) * 50;
+      const defY2 = Math.round((sensorCenterY + boxD / 2) / 50) * 50;
+
+      this._zoneEditCoords[z] = {
+        x1: defX1,
+        y1: defY1,
+        x2: defX2,
+        y2: defY2,
+        angle: 0
+      };
+      this._modifiedZones.add(z);
+      this._lastRenderedZone = null;
+
+      // Send default coordinates to ESP32
+      this._setNumber(this._entities[`zone${z}_x1`], defX1);
+      this._setNumber(this._entities[`zone${z}_y1`], defY1);
+      this._setNumber(this._entities[`zone${z}_x2`], defX2);
+      this._setNumber(this._entities[`zone${z}_y2`], defY2);
+      this._setNumber(this._entities[`zone${z}_angle`], 0);
+
       this._showToast(res.ok
-        ? `Zone ${z} enabled. Entities go live in a few seconds - configure coordinates below.`
-        : `Zone ${z} partly enabled (${res.okCount}/${res.total} entities). See browser console.`);
+        ? `Zone ${z} added in room center (${boxW}×${boxD}mm). Drag on map or edit below!`
+        : `Zone ${z} added in room center (${res.okCount}/${res.total} entities ready).`);
     } finally {
       this._zonePending = false;
       this._renderZoneCardsAndStepper();
@@ -5318,11 +5352,19 @@ class RadarCalibrationCard extends HTMLElement {
 
     let cardsHtml = "";
     for (const z of activeList) {
-      const x1 = getVal(ent[`zone${z}_x1`]);
-      const y1 = getVal(ent[`zone${z}_y1`]);
-      const x2 = getVal(ent[`zone${z}_x2`]);
-      const y2 = getVal(ent[`zone${z}_y2`]);
-      const angle = getVal(ent[`zone${z}_angle`], 0);
+      let x1 = getVal(ent[`zone${z}_x1`]);
+      let y1 = getVal(ent[`zone${z}_y1`]);
+      let x2 = getVal(ent[`zone${z}_x2`]);
+      let y2 = getVal(ent[`zone${z}_y2`]);
+      let angle = getVal(ent[`zone${z}_angle`], 0);
+
+      if (this._zoneEditCoords && this._zoneEditCoords[z]) {
+        x1 = this._zoneEditCoords[z].x1;
+        y1 = this._zoneEditCoords[z].y1;
+        x2 = this._zoneEditCoords[z].x2;
+        y2 = this._zoneEditCoords[z].y2;
+        angle = this._zoneEditCoords[z].angle || 0;
+      }
       const isConfigured = !(x1 === 0 && x2 === 0 && y1 === 0 && y2 === 0);
       const isOcc = getState(ent[`zone${z}_occupancy`]) === "on";
       const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
@@ -5358,11 +5400,19 @@ class RadarCalibrationCard extends HTMLElement {
     radarSetHtml(grid, cardsHtml);
 
     const curZ = this._selectedZone;
-    const x1 = getVal(ent[`zone${curZ}_x1`]);
-    const y1 = getVal(ent[`zone${curZ}_y1`]);
-    const x2 = getVal(ent[`zone${curZ}_x2`]);
-    const y2 = getVal(ent[`zone${curZ}_y2`]);
-    const angle = getVal(ent[`zone${curZ}_angle`], 0);
+    let x1 = getVal(ent[`zone${curZ}_x1`]);
+    let y1 = getVal(ent[`zone${curZ}_y1`]);
+    let x2 = getVal(ent[`zone${curZ}_x2`]);
+    let y2 = getVal(ent[`zone${curZ}_y2`]);
+    let angle = getVal(ent[`zone${curZ}_angle`], 0);
+
+    if (this._zoneEditCoords && this._zoneEditCoords[curZ]) {
+      x1 = this._zoneEditCoords[curZ].x1;
+      y1 = this._zoneEditCoords[curZ].y1;
+      x2 = this._zoneEditCoords[curZ].x2;
+      y2 = this._zoneEditCoords[curZ].y2;
+      angle = this._zoneEditCoords[curZ].angle || 0;
+    }
     const isOcc = getState(ent[`zone${curZ}_occupancy`]) === "on";
     const isExcl = getState(ent[`zone${curZ}_mode`]) === "Exclusion";
 
