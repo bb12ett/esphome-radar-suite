@@ -4585,11 +4585,11 @@ class RadarCalibrationCard extends HTMLElement {
     for (const z of this._modifiedZones) {
       const c = this._zoneEditCoords[z];
       if (c) {
-        if (ent[`zone${z}_x1`]) await this._setNumber(ent[`zone${z}_x1`], c.x1);
-        if (ent[`zone${z}_y1`]) await this._setNumber(ent[`zone${z}_y1`], c.y1);
-        if (ent[`zone${z}_x2`]) await this._setNumber(ent[`zone${z}_x2`], c.x2);
-        if (ent[`zone${z}_y2`]) await this._setNumber(ent[`zone${z}_y2`], c.y2);
-        if (ent[`zone${z}_angle`]) await this._setNumber(ent[`zone${z}_angle`], c.angle || 0);
+        if (ent[`zone${z}_x1`]) await this._setNumber(ent[`zone${z}_x1`], Math.round(c.x1));
+        if (ent[`zone${z}_y1`]) await this._setNumber(ent[`zone${z}_y1`], Math.round(c.y1));
+        if (ent[`zone${z}_x2`]) await this._setNumber(ent[`zone${z}_x2`], Math.round(c.x2));
+        if (ent[`zone${z}_y2`]) await this._setNumber(ent[`zone${z}_y2`], Math.round(c.y2));
+        if (ent[`zone${z}_angle`]) await this._setNumber(ent[`zone${z}_angle`], Math.round(c.angle || 0));
       }
     }
 
@@ -5043,7 +5043,7 @@ class RadarCalibrationCard extends HTMLElement {
       if (c) {
         const w = Math.abs(c.x2 - c.x1);
         const d = Math.abs(c.y2 - c.y1);
-        text = `Zone ${z}: ${Math.round(w)} × ${Math.round(d)} mm (Angle: ${c.angle || 0}°)`;
+        text = `Zone ${z}: ${Math.round(w)} × ${Math.round(d)} mm (Angle: ${Math.round(c.angle || 0)}°)`;
         const rw = this._formState.roomWidth || 4000;
         const sx = (rw / 2) + (this._formState.sensorOffsetX || 0);
         hx = sx + (c.x1 + c.x2) / 2;
@@ -6136,11 +6136,11 @@ class RadarCalibrationCard extends HTMLElement {
           const zy2 = parseFloat(stepContent.querySelector("#inpZone_y2").value) || 0;
           const zang = parseFloat(stepContent.querySelector("#inpZone_angle").value) || 0;
 
-          this._setNumber(ent[`zone${curZ}_x1`], zx1);
-          this._setNumber(ent[`zone${curZ}_y1`], zy1);
-          this._setNumber(ent[`zone${curZ}_x2`], zx2);
-          this._setNumber(ent[`zone${curZ}_y2`], zy2);
-          this._setNumber(ent[`zone${curZ}_angle`], zang);
+          this._setNumber(ent[`zone${curZ}_x1`], Math.round(zx1));
+          this._setNumber(ent[`zone${curZ}_y1`], Math.round(zy1));
+          this._setNumber(ent[`zone${curZ}_x2`], Math.round(zx2));
+          this._setNumber(ent[`zone${curZ}_y2`], Math.round(zy2));
+          this._setNumber(ent[`zone${curZ}_angle`], Math.round(zang));
           this._zoneDirty = false;
           this._showToast(`💾 Zone ${curZ} coordinates saved to ESP32!`);
           this._updateViewfinder();
