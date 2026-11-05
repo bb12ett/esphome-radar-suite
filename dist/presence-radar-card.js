@@ -1010,7 +1010,7 @@ class RadarFloorplanManager {
             <label style="font-size:0.82rem; font-weight:600;">Overlay Opacity</label>
             <span id="${idPrefix}OpacityLabel" style="font-size:0.82rem; font-weight:700; color:var(--primary-color, #38bdf8);">45%</span>
           </div>
-          <input type="range" id="${idPrefix}OpacityRange" min="10" max="100" value="45"
+          <input type="range" id="${idPrefix}OpacityRange" min="0" max="100" value="45"
                  style="width:100%; cursor:pointer; accent-color:var(--primary-color, #38bdf8);" />
         </div>
 
