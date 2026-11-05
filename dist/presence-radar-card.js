@@ -1129,17 +1129,17 @@ class RadarFloorplanManager {
       <div style="border-top:1px solid rgba(255,255,255,0.12); padding-top:14px; margin-top:6px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <label style="font-size:0.9rem; font-weight:700; display:flex; align-items:center; gap:6px;">
-            <span>🖼️</span> Floorplan Overlay (Per-Sensor)
+            <span>🖼️</span> <span id="${idPrefix}TitleLabel">Floorplan Overlay (Per-Sensor)</span>
           </label>
           <span id="${idPrefix}ActiveBadge" style="display:none; font-size:0.72rem; padding:2px 8px; border-radius:10px; background:rgba(56,189,248,0.15); color:#38bdf8; font-weight:600;">
             Configured
           </span>
         </div>
-        <div style="font-size:0.75rem; color:var(--secondary-text-color, #94a3b8); margin-bottom:12px; line-height:1.4;">
+        <div id="${idPrefix}SubDesc" style="font-size:0.75rem; color:var(--secondary-text-color, #94a3b8); margin-bottom:12px; line-height:1.4;">
           Display an architectural floorplan or room map under the radar beam. Configured per sensor so switching sensors in the dropdown dynamically switches the floorplan.
         </div>
 
-        <div style="margin-bottom:12px;">
+        <div id="${idPrefix}DeviceRow" style="margin-bottom:12px;">
           <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Configure Floorplan For Sensor</label>
           <select id="${idPrefix}DeviceSelect" style="width:100%; padding:8px 10px; border-radius:6px; background:var(--card-background-color, #1e293b); color:var(--primary-text-color, #fff); border:1px solid rgba(255,255,255,0.2);">
             <option value="">Select a sensor...</option>
@@ -1195,7 +1195,7 @@ class RadarFloorplanManager {
 
         <div style="display:flex; justify-content:flex-end;">
           <button type="button" id="${idPrefix}BtnClear" style="padding:6px 12px; font-size:0.78rem; background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3); border-radius:6px; cursor:pointer;">
-            🗑️ Clear Floorplan for Selected Sensor
+            🗑️ Clear Floorplan
           </button>
         </div>
       </div>
@@ -1216,6 +1216,12 @@ class RadarFloorplanManager {
     const inpY = container.querySelector(`#${idPrefix}OffsetY`);
     const btnClear = container.querySelector(`#${idPrefix}BtnClear`);
 
+    const getActiveDevice = () => {
+      const pinned = editorInstance._config && editorInstance._config.device;
+      if (pinned && pinned.trim() !== "") return pinned.trim();
+      return selDev ? selDev.value : "";
+    };
+
     if (selDev) {
       selDev.addEventListener("change", () => {
         RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, selDev.value);
@@ -1235,7 +1241,7 @@ class RadarFloorplanManager {
     }
 
     const saveFromEditor = () => {
-      const dev = selDev ? selDev.value : "";
+      const dev = getActiveDevice();
       if (!dev) return;
 
       const imgVal = inpImg ? inpImg.value.trim() : "";
@@ -1272,7 +1278,7 @@ class RadarFloorplanManager {
 
     if (btnClear) {
       btnClear.addEventListener("click", () => {
-        const dev = selDev ? selDev.value : "";
+        const dev = getActiveDevice();
         if (!dev) return;
         RadarFloorplanManager.saveFloorplan(dev, null, editorInstance);
         RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, dev);
@@ -1331,29 +1337,54 @@ class RadarFloorplanManager {
   }
 
   static updateEditorForm(container, idPrefix = "fpEdit", editorInstance) {
-    if (!container || !editorInstance._hass) return;
+    if (!container) return;
+    const devRow = container.querySelector(`#${idPrefix}DeviceRow`);
     const selDev = container.querySelector(`#${idPrefix}DeviceSelect`);
-    if (!selDev) return;
+    const titleLbl = container.querySelector(`#${idPrefix}TitleLabel`);
+    const subDesc = container.querySelector(`#${idPrefix}SubDesc`);
+    const btnClear = container.querySelector(`#${idPrefix}BtnClear`);
+
+    const pinnedDev = editorInstance._config && editorInstance._config.device;
+    const hasPinned = Boolean(pinnedDev && pinnedDev.trim() !== "");
+
+    if (devRow) {
+      devRow.style.display = hasPinned ? "none" : "block";
+    }
+    if (titleLbl) {
+      titleLbl.textContent = hasPinned ? "Floorplan Overlay" : "Floorplan Overlay (Per-Sensor)";
+    }
+    if (subDesc) {
+      subDesc.textContent = hasPinned
+        ? "Display an architectural floorplan or room map under the radar beam for this sensor."
+        : "Display an architectural floorplan or room map under the radar beam. Configured per sensor so switching sensors in the dropdown dynamically switches the floorplan.";
+    }
+    if (btnClear) {
+      btnClear.textContent = hasPinned ? "🗑️ Clear Floorplan" : "🗑️ Clear Floorplan for Selected Sensor";
+    }
+
+    if (!editorInstance._hass) return;
 
     const devices = RadarEntityResolver.getDevices(editorInstance._hass);
-    const prevVal = selDev.value;
+    let targetDevice = "";
 
-    let targetDevice = prevVal;
-    if (!targetDevice || !devices.some(d => d.prefix === targetDevice)) {
-      if (editorInstance._config && editorInstance._config.device && devices.some(d => d.prefix === editorInstance._config.device)) {
-        targetDevice = editorInstance._config.device;
+    if (hasPinned) {
+      targetDevice = pinnedDev;
+      if (selDev) selDev.value = pinnedDev;
+    } else {
+      const prevVal = selDev ? selDev.value : "";
+      if (prevVal && devices.some(d => d.prefix === prevVal)) {
+        targetDevice = prevVal;
       } else if (devices.length > 0) {
         targetDevice = devices[0].prefix;
-      } else {
-        targetDevice = "";
+      }
+      if (selDev) {
+        selDev.innerHTML = devices.length === 0
+          ? `<option value="">No presence sensors discovered</option>`
+          : devices.map(d => `<option value="${d.prefix}" ${d.prefix === targetDevice ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("");
+        selDev.value = targetDevice;
       }
     }
 
-    selDev.innerHTML = devices.length === 0
-      ? `<option value="">No presence sensors discovered</option>`
-      : devices.map(d => `<option value="${d.prefix}" ${d.prefix === targetDevice ? "selected" : ""}>${d.name} (${d.prefix})</option>`).join("");
-
-    selDev.value = targetDevice;
     RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, targetDevice);
   }
 }
