@@ -900,6 +900,9 @@ class RadarFloorplanManager {
     }
     const clipAttr = clipId ? `clip-path="url(#${clipId})"` : "";
     return `
+      <!-- Dark room backing under floorplan for smooth blending when opacity < 1 -->
+      <rect x="0" y="0" width="${geom.roomWidth}" height="${geom.roomDepth}"
+            fill="rgba(15, 23, 42, 0.6)" rx="6" />
       <g id="floorplanContainer" ${clipAttr} pointer-events="none">
         <image href="${fp.image}" x="${x}" y="${y}" width="${w}" height="${d}"
                opacity="${opacity}" preserveAspectRatio="none" />
@@ -2774,10 +2777,12 @@ class RadarMapCard extends HTMLElement {
     // Render Room Walls
     const roomLayer = this.shadowRoot.getElementById("roomLayer");
     if (roomLayer) {
+      const hasFp = Boolean(fp && fp.image);
+      const roomFill = hasFp ? "none" : "rgba(15, 23, 42, 0.6)";
       radarSetHtml(roomLayer, `
         <!-- Outer Architectural Wall -->
         <rect x="0" y="0" width="${geom.roomWidth}" height="${geom.roomDepth}"
-              fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="8" rx="6" />
+              fill="${roomFill}" stroke="#38bdf8" stroke-width="8" rx="6" />
         <!-- Dimension Labels -->
         <text x="${geom.roomWidth / 2}" y="-120" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle">
           ${Math.round(geom.roomWidth)} mm
@@ -5433,9 +5438,11 @@ class RadarCalibrationCard extends HTMLElement {
     // 2. Update Room Walls
     const vfRoom = this.shadowRoot.getElementById("vfRoomLayer");
     if (vfRoom) {
+      const hasFp = Boolean(calFp && calFp.image);
+      const vfRoomFill = hasFp ? "none" : "rgba(15, 23, 42, 0.6)";
       radarSetHtml(vfRoom, `
         <rect x="0" y="0" width="${rw}" height="${rd}"
-              fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="8" rx="6" />
+              fill="${vfRoomFill}" stroke="#38bdf8" stroke-width="8" rx="6" />
         <text x="${rw / 2}" y="-120" fill="#94a3b8" font-size="160" font-weight="700" text-anchor="middle">
           ${Math.round(rw)} mm
         </text>
