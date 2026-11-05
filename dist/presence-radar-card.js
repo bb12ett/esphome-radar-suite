@@ -833,6 +833,8 @@ if (typeof window !== "undefined") {
 // FLOORPLAN MANAGER: Per-Sensor Image Overlay, Scaling & Live Setup
 // ====================================================================
 class RadarFloorplanManager {
+  static _version = 0;
+
   static getFloorplan(config, device) {
     if (!device) return null;
     // 1. Check card config dictionary
@@ -850,7 +852,7 @@ class RadarFloorplanManager {
     if (config && (config.floorplan_image || (config.floorplan && config.floorplan.image))) {
       return {
         image: config.floorplan_image || config.floorplan.image,
-        opacity: config.floorplan_opacity !== undefined ? config.floorplan_opacity : (config.floorplan?.opacity || 0.45),
+        opacity: config.floorplan_opacity !== undefined ? config.floorplan_opacity : (config.floorplan?.opacity ?? 0.45),
         fit: config.floorplan_fit || config.floorplan?.fit || "room",
         width: config.floorplan_width || config.floorplan?.width || 0,
         depth: config.floorplan_depth || config.floorplan?.depth || 0,
@@ -863,6 +865,7 @@ class RadarFloorplanManager {
 
   static saveFloorplan(device, fpData, cardOrEditorInstance) {
     if (!device) return;
+    this._version++;
     try {
       if (fpData && fpData.image) {
         localStorage.setItem(`presence_radar_fp_${device}`, JSON.stringify(fpData));
@@ -899,12 +902,13 @@ class RadarFloorplanManager {
       d = parseFloat(fp.depth) || geom.roomDepth;
     }
     const clipAttr = clipId ? `clip-path="url(#${clipId})"` : "";
+    const safeHref = String(fp.image).replace(/"/g, "&quot;");
     return `
       <!-- Dark room backing under floorplan for smooth blending when opacity < 1 -->
       <rect x="0" y="0" width="${geom.roomWidth}" height="${geom.roomDepth}"
             fill="rgba(15, 23, 42, 0.6)" rx="6" />
       <g id="floorplanContainer" ${clipAttr} pointer-events="none">
-        <image href="${fp.image}" x="${x}" y="${y}" width="${w}" height="${d}"
+        <image href="${safeHref}" x="${x}" y="${y}" width="${w}" height="${d}"
                opacity="${opacity}" preserveAspectRatio="none" />
       </g>
     `;
@@ -1128,7 +1132,10 @@ class RadarFloorplanManager {
 
     // File Input Picker
     if (btnChoose && fileInp) {
-      btnChoose.addEventListener("click", () => fileInp.click());
+      btnChoose.addEventListener("click", () => {
+        fileInp.value = "";
+        fileInp.click();
+      });
       fileInp.addEventListener("change", () => {
         const file = fileInp.files && fileInp.files[0];
         if (!file) return;
@@ -1164,6 +1171,7 @@ class RadarFloorplanManager {
       btnClear.addEventListener("click", () => {
         const dev = getActiveDevice();
         if (!dev) return;
+        if (fileInp) fileInp.value = "";
         RadarFloorplanManager.saveFloorplan(dev, null, editorInstance);
         RadarFloorplanManager._populateEditorFields(container, idPrefix, editorInstance, dev);
       });
@@ -1194,7 +1202,8 @@ class RadarFloorplanManager {
       inpImg.value = imgVal;
     }
     if (presetSel && (!hasDoc || document.activeElement !== presetSel)) {
-      presetSel.value = (presetSel.querySelector(`option[value="${imgVal}"]`) ? imgVal : "");
+      const hasMatchingOption = Array.from(presetSel.options || []).some(opt => opt.value === imgVal);
+      presetSel.value = (imgVal && hasMatchingOption) ? imgVal : "";
     }
     if (statusLbl) {
       if (imgVal.startsWith("data:")) {
@@ -1376,8 +1385,8 @@ class RadarMapCardEditor extends HTMLElement {
       const fpDevSel = this.querySelector("#mapFpEditDeviceSelect");
       if (fpDevSel && selDevice.value) {
         fpDevSel.value = selDevice.value;
-        RadarFloorplanManager.updateEditorForm(this, "mapFpEdit", this);
       }
+      RadarFloorplanManager.updateEditorForm(this, "mapFpEdit", this);
     });
     inpTitle.addEventListener("input", notify);
     selLayout.addEventListener("change", notify);
@@ -1906,6 +1915,7 @@ class RadarMapCard extends HTMLElement {
   }
 
   setConfig(config) {
+    const prevCfg = this._config;
     this._config = Object.assign({
       title: "Presence Radar Map",
       device: "",
@@ -1917,11 +1927,18 @@ class RadarMapCard extends HTMLElement {
     }
 
     if (this._rendered && this._hass) {
+      const onlyFloorplanChanged = prevCfg &&
+        prevCfg.device === this._config.device &&
+        prevCfg.title === this._config.title &&
+        prevCfg.layout_mode === this._config.layout_mode;
+
       this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
-      this._trails = { 1: [], 2: [], 3: [] };
-      this._watchIds = null;
+      if (!onlyFloorplanChanged) {
+        this._trails = { 1: [], 2: [], 3: [] };
+        this._watchIds = null;
+        this._render();
+      }
       this._lastSig = null;
-      this._render();
       this._update();
     }
   }
@@ -1979,7 +1996,7 @@ class RadarMapCard extends HTMLElement {
       this._watchIds = Object.values(ent).filter(v => typeof v === "string" && v.indexOf(".") > 0);
     }
     const states = this._hass.states;
-    let sig = RadarEntityResolver._registryVersion + "|";
+    let sig = RadarEntityResolver._registryVersion + "|" + RadarFloorplanManager._version + "|";
     for (const id of this._watchIds) {
       const s = states[id];
       sig += (s ? s.state : "-") + "|";
@@ -3047,8 +3064,8 @@ class RadarCalibrationCardEditor extends HTMLElement {
       const fpDevSel = this.querySelector("#calFpEditDeviceSelect");
       if (fpDevSel && selDevice.value) {
         fpDevSel.value = selDevice.value;
-        RadarFloorplanManager.updateEditorForm(this, "calFpEdit", this);
       }
+      RadarFloorplanManager.updateEditorForm(this, "calFpEdit", this);
     });
     inpTitle.addEventListener("input", notify);
 
@@ -3116,6 +3133,7 @@ class RadarCalibrationCard extends HTMLElement {
     this._activeDrag = null;
     this._zoneEditCoords = {};
     this._modifiedZones = new Set();
+    this._pendingZoneInit = {};
     this._initialEditSnapshot = null;
   }
 
@@ -3131,6 +3149,7 @@ class RadarCalibrationCard extends HTMLElement {
   }
 
   setConfig(config) {
+    const prevCfg = this._config;
     this._config = Object.assign({
       title: "Presence Onboarding & Calibration Suite",
       device: ""
@@ -3141,9 +3160,22 @@ class RadarCalibrationCard extends HTMLElement {
     }
 
     if (this._rendered && this._hass) {
+      const onlyFloorplanChanged = prevCfg &&
+        prevCfg.device === this._config.device &&
+        prevCfg.title === this._config.title;
+
       this._entities = RadarEntityResolver.resolve(this._hass, { device: this._selectedDevice });
-      this._resetLiveCaches();
-      this._renderFull();
+      if (!onlyFloorplanChanged) {
+        if (this._mapEditMode) {
+          this._mapEditMode = false;
+          this._activeDrag = null;
+        }
+        this._resetLiveCaches();
+        this._renderFull();
+      } else {
+        this._lastLiveSig = null;
+        this._updateViewfinder();
+      }
     }
   }
 
@@ -3185,9 +3217,12 @@ class RadarCalibrationCard extends HTMLElement {
   _switchDevice(device, broadcast) {
     this._selectedDevice = device;
     this._locallyEnabledZones = new Set();
+    this._zoneEditCoords = {};
+    this._modifiedZones = new Set();
+    this._pendingZoneInit = {};
+    this._initialEditSnapshot = null;
     if (this._mapEditMode) {
-      this._mapEditMode = false;
-      this._activeDrag = null;
+      this._toggleMapEdit(false);
     }
     this._resetLiveCaches();
     if (!this._hass) return;
@@ -4503,30 +4538,34 @@ class RadarCalibrationCard extends HTMLElement {
     return Math.round(val / step) * step;
   }
 
-  _initEditSnapshot() {
-    const ent = this._entities;
-    const stableHass = radarStableHass(this._hass);
-    const states = stableHass.states;
+  _getZoneCoords(z) {
+    if (this._zoneEditCoords && this._zoneEditCoords[z]) {
+      return Object.assign({}, this._zoneEditCoords[z]);
+    }
+    const ent = this._entities || {};
+    const states = radarStableHass(this._hass).states;
     const getVal = (id, def = 0) => {
       if (!id || !states[id]) return def;
       const v = parseFloat(states[id].state);
-      return Number.isFinite(v) ? v : def;
+      return Number.isFinite(v) ? Math.round(v) : def;
     };
+    return {
+      x1: getVal(ent[`zone${z}_x1`]),
+      y1: getVal(ent[`zone${z}_y1`]),
+      x2: getVal(ent[`zone${z}_x2`]),
+      y2: getVal(ent[`zone${z}_y2`]),
+      angle: getVal(ent[`zone${z}_angle`], 0)
+    };
+  }
+
+  _initEditSnapshot() {
     this._initialEditSnapshot = {
       formState: Object.assign({}, this._formState),
-      zones: {}
+      zones: {},
+      hadEditCoords: Object.assign({}, this._zoneEditCoords)
     };
     for (let z = 1; z <= 10; z++) {
-      this._initialEditSnapshot.zones[z] = {
-        x1: getVal(ent[`zone${z}_x1`]),
-        y1: getVal(ent[`zone${z}_y1`]),
-        x2: getVal(ent[`zone${z}_x2`]),
-        y2: getVal(ent[`zone${z}_y2`]),
-        angle: getVal(ent[`zone${z}_angle`], 0)
-      };
-      if (!this._zoneEditCoords[z]) {
-        this._zoneEditCoords[z] = Object.assign({}, this._initialEditSnapshot.zones[z]);
-      }
+      this._initialEditSnapshot.zones[z] = this._getZoneCoords(z);
     }
   }
 
@@ -4559,37 +4598,47 @@ class RadarCalibrationCard extends HTMLElement {
     const ent = this._entities;
     this._showToast("💾 Saving layout & zones to ESP32...");
 
-    const rw = this._formState.roomWidth || 4000;
-    const rd = this._formState.roomDepth || 5000;
-    const off = this._formState.sensorOffsetX || 0;
-    const yaw = this._formState.mountingYaw || 0;
+    const rw = Math.round(this._formState.roomWidth || 4000);
+    const rd = Math.round(this._formState.roomDepth || 5000);
+    const off = Math.round(this._formState.sensorOffsetX || 0);
+    const yaw = Math.round(this._formState.mountingYaw || 0);
 
-    // 1. Save Room Boundaries
-    if (ent.room_width) await this._setNumber(ent.room_width, rw);
-    if (ent.room_depth) await this._setNumber(ent.room_depth, rd);
-    if (ent.sensor_wall_offset_x) await this._setNumber(ent.sensor_wall_offset_x, off);
-    if (ent.mounting_angle) await this._setNumber(ent.mounting_angle, yaw);
+    // 1. Save Room Boundaries (only if modified or no zones modified)
+    if (this._placementDirty || this._modifiedZones.size === 0) {
+      if (ent.room_width) await this._setNumber(ent.room_width, rw);
+      if (ent.room_depth) await this._setNumber(ent.room_depth, rd);
+      if (ent.sensor_wall_offset_x) await this._setNumber(ent.sensor_wall_offset_x, off);
+      if (ent.mounting_angle) await this._setNumber(ent.mounting_angle, yaw);
 
-    if (ent.apply_room_dimensions_btn && this._hass.states[ent.apply_room_dimensions_btn]) {
-      this._pressButton(ent.apply_room_dimensions_btn);
-    } else {
-      const minX = -(rw * 0.5 + off);
-      const maxX = +(rw * 0.5 - off);
-      if (ent.room_min_x) await this._setNumber(ent.room_min_x, minX);
-      if (ent.room_max_x) await this._setNumber(ent.room_max_x, maxX);
-      if (ent.room_min_y) await this._setNumber(ent.room_min_y, 0);
-      if (ent.room_max_y) await this._setNumber(ent.room_max_y, rd);
+      if (ent.apply_room_dimensions_btn && this._hass.states[ent.apply_room_dimensions_btn]) {
+        await new Promise(r => setTimeout(r, 200));
+        this._pressButton(ent.apply_room_dimensions_btn);
+      } else {
+        const minX = Math.round(-(rw * 0.5 + off));
+        const maxX = Math.round(+(rw * 0.5 - off));
+        if (ent.room_min_x) await this._setNumber(ent.room_min_x, minX);
+        if (ent.room_max_x) await this._setNumber(ent.room_max_x, maxX);
+        if (ent.room_min_y) await this._setNumber(ent.room_min_y, 0);
+        if (ent.room_max_y) await this._setNumber(ent.room_max_y, rd);
+      }
     }
 
     // 2. Save modified zones
+    const now = Date.now();
     for (const z of this._modifiedZones) {
       const c = this._zoneEditCoords[z];
       if (c) {
-        if (ent[`zone${z}_x1`]) await this._setNumber(ent[`zone${z}_x1`], Math.round(c.x1));
-        if (ent[`zone${z}_y1`]) await this._setNumber(ent[`zone${z}_y1`], Math.round(c.y1));
-        if (ent[`zone${z}_x2`]) await this._setNumber(ent[`zone${z}_x2`], Math.round(c.x2));
-        if (ent[`zone${z}_y2`]) await this._setNumber(ent[`zone${z}_y2`], Math.round(c.y2));
-        if (ent[`zone${z}_angle`]) await this._setNumber(ent[`zone${z}_angle`], Math.round(c.angle || 0));
+        c.x1 = Math.round(c.x1);
+        c.y1 = Math.round(c.y1);
+        c.x2 = Math.round(c.x2);
+        c.y2 = Math.round(c.y2);
+        c.angle = Math.round(c.angle || 0);
+        c._savedAt = now;
+        if (ent[`zone${z}_x1`]) await this._setNumber(ent[`zone${z}_x1`], c.x1);
+        if (ent[`zone${z}_y1`]) await this._setNumber(ent[`zone${z}_y1`], c.y1);
+        if (ent[`zone${z}_x2`]) await this._setNumber(ent[`zone${z}_x2`], c.x2);
+        if (ent[`zone${z}_y2`]) await this._setNumber(ent[`zone${z}_y2`], c.y2);
+        if (ent[`zone${z}_angle`]) await this._setNumber(ent[`zone${z}_angle`], c.angle);
       }
     }
 
@@ -4598,16 +4647,23 @@ class RadarCalibrationCard extends HTMLElement {
     this._zoneDirty = false;
     this._showToast("⚡ Successfully flashed updated room layout and zones to ESP32!");
     this._toggleMapEdit(false);
+    if (this._activeTab === "zones") {
+      this._renderZoneCardsAndStepper();
+    }
   }
 
   _cancelMapEdits() {
     if (this._initialEditSnapshot) {
       this._formState = Object.assign({}, this._initialEditSnapshot.formState);
       this._zoneEditCoords = {};
-      for (const z in this._initialEditSnapshot.zones) {
-        this._zoneEditCoords[z] = Object.assign({}, this._initialEditSnapshot.zones[z]);
+      if (this._initialEditSnapshot.hadEditCoords) {
+        for (const z in this._initialEditSnapshot.hadEditCoords) {
+          this._zoneEditCoords[z] = Object.assign({}, this._initialEditSnapshot.hadEditCoords[z]);
+        }
       }
       this._modifiedZones.clear();
+      this._placementDirty = false;
+      this._zoneDirty = false;
       const inpW = this.shadowRoot.getElementById("inpRoomWidth");
       if (inpW) inpW.value = this._formState.roomWidth;
       const inpD = this.shadowRoot.getElementById("inpRoomDepth");
@@ -4616,8 +4672,21 @@ class RadarCalibrationCard extends HTMLElement {
       if (inpOff) inpOff.value = this._formState.sensorOffsetX;
       const inpYaw = this.shadowRoot.getElementById("inpMountingYaw");
       if (inpYaw) inpYaw.value = this._formState.mountingYaw;
+      const selCoords = this._getZoneCoords(this._selectedZone);
+      const setInp = (id, val) => {
+        const el = this.shadowRoot.getElementById(id);
+        if (el) el.value = Math.round(val);
+      };
+      setInp("inpZone_x1", selCoords.x1);
+      setInp("inpZone_y1", selCoords.y1);
+      setInp("inpZone_x2", selCoords.x2);
+      setInp("inpZone_y2", selCoords.y2);
+      setInp("inpZone_angle", selCoords.angle || 0);
     }
     this._toggleMapEdit(false);
+    if (this._activeTab === "zones") {
+      this._renderZoneCardsAndStepper();
+    }
     this._showToast("Map edits discarded.");
   }
 
@@ -4640,7 +4709,13 @@ class RadarCalibrationCard extends HTMLElement {
   _bindMapEditEvents() {
     const btnToggle = this.shadowRoot.getElementById("btnToggleMapEdit");
     if (btnToggle) {
-      btnToggle.addEventListener("click", () => this._toggleMapEdit());
+      btnToggle.addEventListener("click", () => {
+        if (this._mapEditMode && (this._placementDirty || (this._modifiedZones && this._modifiedZones.size > 0))) {
+          this._saveMapEdits();
+        } else {
+          this._toggleMapEdit();
+        }
+      });
     }
 
     const btnSnap = this.shadowRoot.getElementById("btnToggleSnap");
@@ -4701,7 +4776,7 @@ class RadarCalibrationCard extends HTMLElement {
         origRoomD: this._formState.roomDepth || 5000,
         origOff: this._formState.sensorOffsetX || 0,
         origYaw: this._formState.mountingYaw || 0,
-        origCoords: zone && this._zoneEditCoords[zone] ? Object.assign({}, this._zoneEditCoords[zone]) : null
+        origCoords: zone ? this._getZoneCoords(zone) : null
       };
 
       if (zone) {
@@ -4783,11 +4858,11 @@ class RadarCalibrationCard extends HTMLElement {
           const sDeltaX = this._snap(deltaX);
           const sDeltaY = this._snap(deltaY);
           this._zoneEditCoords[z] = {
-            x1: orig.x1 + sDeltaX,
-            y1: orig.y1 + sDeltaY,
-            x2: orig.x2 + sDeltaX,
-            y2: orig.y2 + sDeltaY,
-            angle: orig.angle || 0
+            x1: Math.round(orig.x1 + sDeltaX),
+            y1: Math.round(orig.y1 + sDeltaY),
+            x2: Math.round(orig.x2 + sDeltaX),
+            y2: Math.round(orig.y2 + sDeltaY),
+            angle: Math.round(orig.angle || 0)
           };
           this._syncZoneInputsIfSelected(z);
           this._modifiedZones.add(z);
@@ -4813,30 +4888,32 @@ class RadarCalibrationCard extends HTMLElement {
           const rad = ((orig.angle || 0) * Math.PI) / 180;
           const dx = svgPt.x - csx;
           const dy = svgPt.y - csy;
-          const unrotX = this._snap(dx * Math.cos(-rad) - dy * Math.sin(-rad));
-          const unrotY = this._snap(dx * Math.sin(-rad) + dy * Math.cos(-rad));
+          const unrotX = dx * Math.cos(-rad) - dy * Math.sin(-rad);
+          const unrotY = dx * Math.sin(-rad) + dy * Math.cos(-rad);
+          const targetX = this._snap(cx + unrotX);
+          const targetY = this._snap(cy + unrotY);
 
           let nMinX = minX, nMaxX = maxX, nMinY = minY, nMaxY = maxY;
           if (drag.corner === 0) {
-            nMinX = Math.min(maxX - 200, cx + unrotX);
-            nMinY = Math.min(maxY - 200, cy + unrotY);
+            nMinX = Math.min(maxX - 200, targetX);
+            nMinY = Math.min(maxY - 200, targetY);
           } else if (drag.corner === 1) {
-            nMaxX = Math.max(minX + 200, cx + unrotX);
-            nMinY = Math.min(maxY - 200, cy + unrotY);
+            nMaxX = Math.max(minX + 200, targetX);
+            nMinY = Math.min(maxY - 200, targetY);
           } else if (drag.corner === 2) {
-            nMaxX = Math.max(minX + 200, cx + unrotX);
-            nMaxY = Math.max(minY + 200, cy + unrotY);
+            nMaxX = Math.max(minX + 200, targetX);
+            nMaxY = Math.max(minY + 200, targetY);
           } else if (drag.corner === 3) {
-            nMinX = Math.min(maxX - 200, cx + unrotX);
-            nMaxY = Math.max(minY + 200, cy + unrotY);
+            nMinX = Math.min(maxX - 200, targetX);
+            nMaxY = Math.max(minY + 200, targetY);
           }
 
           this._zoneEditCoords[z] = {
-            x1: nMinX,
-            y1: nMinY,
-            x2: nMaxX,
-            y2: nMaxY,
-            angle: orig.angle || 0
+            x1: Math.round(nMinX),
+            y1: Math.round(nMinY),
+            x2: Math.round(nMaxX),
+            y2: Math.round(nMaxY),
+            angle: Math.round(orig.angle || 0)
           };
           this._syncZoneInputsIfSelected(z);
           this._modifiedZones.add(z);
@@ -4865,11 +4942,11 @@ class RadarCalibrationCard extends HTMLElement {
           deg = Math.round(deg / 5) * 5;
 
           this._zoneEditCoords[z] = {
-            x1: orig.x1,
-            y1: orig.y1,
-            x2: orig.x2,
-            y2: orig.y2,
-            angle: deg
+            x1: Math.round(orig.x1),
+            y1: Math.round(orig.y1),
+            x2: Math.round(orig.x2),
+            y2: Math.round(orig.y2),
+            angle: Math.round(deg)
           };
           this._syncZoneInputsIfSelected(z);
           this._modifiedZones.add(z);
@@ -4883,6 +4960,7 @@ class RadarCalibrationCard extends HTMLElement {
 
     const endDrag = (e) => {
       if (this._activeDrag && e.pointerId === this._activeDrag.pointerId) {
+        const wasZoneDrag = this._activeDrag.type && this._activeDrag.type.startsWith("zone-");
         try {
           if (this._activeDrag.handle && this._activeDrag.handle.releasePointerCapture) {
             this._activeDrag.handle.releasePointerCapture(e.pointerId);
@@ -4890,6 +4968,9 @@ class RadarCalibrationCard extends HTMLElement {
         } catch (_) {}
         this._activeDrag = null;
         this._updateViewfinder();
+        if (wasZoneDrag && this._activeTab === "zones") {
+          this._renderZoneCardsAndStepper();
+        }
       }
     };
 
@@ -5278,10 +5359,10 @@ class RadarCalibrationCard extends HTMLElement {
     if (btnFlash) {
       btnFlash.addEventListener("click", () => {
         this._placementDirty = false;
-        const rw = this._formState.roomWidth || 4000;
-        const rd = this._formState.roomDepth || 5000;
-        const off = this._formState.sensorOffsetX || 0;
-        const yaw = this._formState.mountingYaw || 0;
+        const rw = Math.round(this._formState.roomWidth || 4000);
+        const rd = Math.round(this._formState.roomDepth || 5000);
+        const off = Math.round(this._formState.sensorOffsetX || 0);
+        const yaw = Math.round(this._formState.mountingYaw || 0);
 
         if (this._entities.room_width) this._setNumber(this._entities.room_width, rw);
         if (this._entities.room_depth) this._setNumber(this._entities.room_depth, rd);
@@ -5292,8 +5373,8 @@ class RadarCalibrationCard extends HTMLElement {
           if (this._entities.apply_room_dimensions_btn && this._hass && this._hass.states[this._entities.apply_room_dimensions_btn]) {
             this._pressButton(this._entities.apply_room_dimensions_btn);
           } else {
-            const minX = -(rw * 0.5 + off);
-            const maxX = +(rw * 0.5 - off);
+            const minX = Math.round(-(rw * 0.5 + off));
+            const maxX = Math.round(+(rw * 0.5 - off));
             if (this._entities.room_min_x) this._setNumber(this._entities.room_min_x, minX);
             if (this._entities.room_max_x) this._setNumber(this._entities.room_max_x, maxX);
             if (this._entities.room_min_y) this._setNumber(this._entities.room_min_y, 0);
@@ -5497,13 +5578,7 @@ class RadarCalibrationCard extends HTMLElement {
         const zOcc = getState(ent[`zone${z}_occupancy`]) === "on";
         const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
 
-        if (this._zoneEditCoords && this._zoneEditCoords[z]) {
-          x1 = this._zoneEditCoords[z].x1;
-          y1 = this._zoneEditCoords[z].y1;
-          x2 = this._zoneEditCoords[z].x2;
-          y2 = this._zoneEditCoords[z].y2;
-          zAngle = this._zoneEditCoords[z].angle || 0;
-        } else if (z === this._selectedZone && this._zoneDirty) {
+        if (z === this._selectedZone && this._zoneDirty && !this._activeDrag) {
           const inX1 = this.shadowRoot.getElementById("inpZone_x1");
           const inY1 = this.shadowRoot.getElementById("inpZone_y1");
           const inX2 = this.shadowRoot.getElementById("inpZone_x2");
@@ -5521,6 +5596,12 @@ class RadarCalibrationCard extends HTMLElement {
             if (!isNaN(vy2)) y2 = vy2;
             if (!isNaN(va)) zAngle = va;
           }
+        } else if (this._zoneEditCoords && this._zoneEditCoords[z]) {
+          x1 = this._zoneEditCoords[z].x1;
+          y1 = this._zoneEditCoords[z].y1;
+          x2 = this._zoneEditCoords[z].x2;
+          y2 = this._zoneEditCoords[z].y2;
+          zAngle = this._zoneEditCoords[z].angle || 0;
         }
 
         if (x1 !== 0 || x2 !== 0 || y1 !== 0 || y2 !== 0) {
@@ -5621,7 +5702,7 @@ class RadarCalibrationCard extends HTMLElement {
     }
     const states = this._hass.states;
     let sig = [
-      RadarEntityResolver._registryVersion, this._activeTab, this._selectedZone,
+      RadarEntityResolver._registryVersion, RadarFloorplanManager._version, this._activeTab, this._selectedZone,
       this._zonePending ? 1 : 0, this._mapEditMode ? 1 : 0, Array.from(this._locallyEnabledZones || []).join(",")
     ].join("|") + "|";
     for (const id of this._watchIds) {
@@ -5652,6 +5733,48 @@ class RadarCalibrationCard extends HTMLElement {
     const states = this._hass.states;
     const stableHass = radarStableHass(this._hass);
     RadarUpdateManager.updateBanner(this.shadowRoot, "calUpd", stableHass, ent, this._selectedDevice, this);
+
+    // Flush any newly-enabled zone default coordinates once Home Assistant brings the entities online
+    if (this._pendingZoneInit) {
+      for (const zKey of Object.keys(this._pendingZoneInit)) {
+        const z = parseInt(zKey, 10);
+        const x1Id = ent[`zone${z}_x1`];
+        if (x1Id && states[x1Id] && states[x1Id].state !== "unavailable") {
+          delete this._pendingZoneInit[z];
+          const c = this._zoneEditCoords && this._zoneEditCoords[z];
+          if (c) {
+            this._setNumber(ent[`zone${z}_x1`], Math.round(c.x1));
+            this._setNumber(ent[`zone${z}_y1`], Math.round(c.y1));
+            this._setNumber(ent[`zone${z}_x2`], Math.round(c.x2));
+            this._setNumber(ent[`zone${z}_y2`], Math.round(c.y2));
+            this._setNumber(ent[`zone${z}_angle`], Math.round(c.angle || 0));
+            if (!this._modifiedZones || !this._modifiedZones.has(z)) {
+              c._savedAt = Date.now();
+            }
+          }
+        }
+      }
+    }
+
+    // Clean up saved _zoneEditCoords cache once HA states match or settle
+    if (!this._mapEditMode && this._zoneEditCoords) {
+      const now = Date.now();
+      for (const zKey of Object.keys(this._zoneEditCoords)) {
+        const z = parseInt(zKey, 10);
+        const c = this._zoneEditCoords[z];
+        if (c && c._savedAt && (!this._modifiedZones || !this._modifiedZones.has(z))) {
+          const sx1 = states[ent[`zone${z}_x1`]] ? Math.round(parseFloat(states[ent[`zone${z}_x1`]].state)) : NaN;
+          const sy1 = states[ent[`zone${z}_y1`]] ? Math.round(parseFloat(states[ent[`zone${z}_y1`]].state)) : NaN;
+          const sx2 = states[ent[`zone${z}_x2`]] ? Math.round(parseFloat(states[ent[`zone${z}_x2`]].state)) : NaN;
+          const sy2 = states[ent[`zone${z}_y2`]] ? Math.round(parseFloat(states[ent[`zone${z}_y2`]].state)) : NaN;
+          const sang = states[ent[`zone${z}_angle`]] ? Math.round(parseFloat(states[ent[`zone${z}_angle`]].state) || 0) : 0;
+          const matchesHass = (sx1 === Math.round(c.x1) && sy1 === Math.round(c.y1) && sx2 === Math.round(c.x2) && sy2 === Math.round(c.y2) && sang === Math.round(c.angle || 0));
+          if (matchesHass || (now - c._savedAt > 4000)) {
+            delete this._zoneEditCoords[z];
+          }
+        }
+      }
+    }
 
     // Pick up room geometry changes from the ESP32 (or values that arrived after a reconnect)
     if (!this._mapEditMode && !this._placementDirty && this._roomSig() !== this._lastRoomSig) {
@@ -5760,15 +5883,24 @@ class RadarCalibrationCard extends HTMLElement {
         y2: defY2,
         angle: 0
       };
-      this._modifiedZones.add(z);
       this._lastRenderedZone = null;
 
-      // Send default coordinates to ESP32
-      this._setNumber(this._entities[`zone${z}_x1`], defX1);
-      this._setNumber(this._entities[`zone${z}_y1`], defY1);
-      this._setNumber(this._entities[`zone${z}_x2`], defX2);
-      this._setNumber(this._entities[`zone${z}_y2`], defY2);
-      this._setNumber(this._entities[`zone${z}_angle`], 0);
+      // Send default coordinates to ESP32 immediately if entities are live, or queue until HA loads them
+      const x1Id = this._entities[`zone${z}_x1`];
+      if (x1Id && this._hass.states[x1Id] && this._hass.states[x1Id].state !== "unavailable") {
+        this._zoneEditCoords[z]._savedAt = Date.now();
+        this._setNumber(this._entities[`zone${z}_x1`], defX1);
+        this._setNumber(this._entities[`zone${z}_y1`], defY1);
+        this._setNumber(this._entities[`zone${z}_x2`], defX2);
+        this._setNumber(this._entities[`zone${z}_y2`], defY2);
+        this._setNumber(this._entities[`zone${z}_angle`], 0);
+      } else {
+        if (!this._pendingZoneInit) this._pendingZoneInit = {};
+        this._pendingZoneInit[z] = true;
+      }
+      if (this._mapEditMode) {
+        this._modifiedZones.add(z);
+      }
 
       this._showToast(res.ok
         ? `Zone ${z} added in room center (${boxW}×${boxD}mm). Drag on map or edit below!`
@@ -5787,6 +5919,9 @@ class RadarCalibrationCard extends HTMLElement {
     this._zonePending = true;
     this._renderZoneCardsAndStepper();
     try {
+      if (this._zoneEditCoords) delete this._zoneEditCoords[z];
+      if (this._modifiedZones) this._modifiedZones.delete(z);
+      if (this._pendingZoneInit) delete this._pendingZoneInit[z];
       // Clear coordinates on the ESP32 first, then disable the entities
       await Promise.allSettled(["x1", "y1", "x2", "y2", "angle"].map(k => this._setNumber(ent[`zone${z}_${k}`], 0)));
       const res = await RadarVisibilityManager.disableZone(this._hass, ent, z);
@@ -5897,8 +6032,9 @@ class RadarCalibrationCard extends HTMLElement {
       const isExcl = getState(ent[`zone${z}_mode`]) === "Exclusion";
       const isSelected = z === this._selectedZone;
 
-      const width = isConfigured ? Math.abs(x2 - x1) : 0;
-      const depth = isConfigured ? Math.abs(y2 - y1) : 0;
+      const width = isConfigured ? Math.round(Math.abs(x2 - x1)) : 0;
+      const depth = isConfigured ? Math.round(Math.abs(y2 - y1)) : 0;
+      const roundAngle = Math.round(angle);
 
       cardsHtml += `
         <div class="zone-card ${isSelected ? "selected" : ""} ${isExcl ? "exclusion" : ""}" data-zone="${z}">
@@ -5914,7 +6050,7 @@ class RadarCalibrationCard extends HTMLElement {
           <div class="zone-coords-info">
             ${isConfigured ? `
               <div>Size: <b>${width} × ${depth} mm</b></div>
-              <div>Center: (${Math.round((x1+x2)/2)}, ${Math.round((y1+y2)/2)}) ${angle !== 0 ? `[${angle}°]` : ""}</div>
+              <div>Center: (${Math.round((x1+x2)/2)}, ${Math.round((y1+y2)/2)}) ${roundAngle !== 0 ? `[${roundAngle}°]` : ""}</div>
               <div>Mode: <b>${isExcl ? "🔴 Exclusion Mask" : "🟢 Detection Zone"}</b></div>
             ` : `
               <div>Not configured yet (${isExcl ? "Mask" : "Detection"})</div>
@@ -6088,6 +6224,8 @@ class RadarCalibrationCard extends HTMLElement {
       if (btnC2) {
         btnC2.addEventListener("click", () => {
           this._zoneDirty = false;
+          if (this._zoneEditCoords) delete this._zoneEditCoords[curZ];
+          if (this._modifiedZones) this._modifiedZones.delete(curZ);
           this._setSelect(ent.zone_select, `Zone ${curZ}`);
           setTimeout(() => {
             this._pressButton(ent.btn_corner_2);
@@ -6101,6 +6239,8 @@ class RadarCalibrationCard extends HTMLElement {
         btnClr.addEventListener("click", () => {
           if (confirm(`Clear coordinates for Zone ${curZ}?`)) {
             this._zoneDirty = false;
+            if (this._zoneEditCoords) delete this._zoneEditCoords[curZ];
+            if (this._modifiedZones) this._modifiedZones.delete(curZ);
             if (ent.btn_clear_zone && states[ent.btn_clear_zone]) {
               this._setSelect(ent.zone_select, `Zone ${curZ}`);
               setTimeout(() => {
@@ -6130,19 +6270,30 @@ class RadarCalibrationCard extends HTMLElement {
       const btnSaveManual = stepContent.querySelector("#btnSaveZoneManual");
       if (btnSaveManual) {
         btnSaveManual.addEventListener("click", () => {
-          const zx1 = parseFloat(stepContent.querySelector("#inpZone_x1").value) || 0;
-          const zy1 = parseFloat(stepContent.querySelector("#inpZone_y1").value) || 0;
-          const zx2 = parseFloat(stepContent.querySelector("#inpZone_x2").value) || 0;
-          const zy2 = parseFloat(stepContent.querySelector("#inpZone_y2").value) || 0;
-          const zang = parseFloat(stepContent.querySelector("#inpZone_angle").value) || 0;
+          const zx1 = Math.round(parseFloat(stepContent.querySelector("#inpZone_x1").value) || 0);
+          const zy1 = Math.round(parseFloat(stepContent.querySelector("#inpZone_y1").value) || 0);
+          const zx2 = Math.round(parseFloat(stepContent.querySelector("#inpZone_x2").value) || 0);
+          const zy2 = Math.round(parseFloat(stepContent.querySelector("#inpZone_y2").value) || 0);
+          const zang = Math.round(parseFloat(stepContent.querySelector("#inpZone_angle").value) || 0);
 
-          this._setNumber(ent[`zone${curZ}_x1`], Math.round(zx1));
-          this._setNumber(ent[`zone${curZ}_y1`], Math.round(zy1));
-          this._setNumber(ent[`zone${curZ}_x2`], Math.round(zx2));
-          this._setNumber(ent[`zone${curZ}_y2`], Math.round(zy2));
-          this._setNumber(ent[`zone${curZ}_angle`], Math.round(zang));
+          this._zoneEditCoords[curZ] = {
+            x1: zx1,
+            y1: zy1,
+            x2: zx2,
+            y2: zy2,
+            angle: zang,
+            _savedAt: Date.now()
+          };
+          if (this._modifiedZones) this._modifiedZones.delete(curZ);
+
+          this._setNumber(ent[`zone${curZ}_x1`], zx1);
+          this._setNumber(ent[`zone${curZ}_y1`], zy1);
+          this._setNumber(ent[`zone${curZ}_x2`], zx2);
+          this._setNumber(ent[`zone${curZ}_y2`], zy2);
+          this._setNumber(ent[`zone${curZ}_angle`], zang);
           this._zoneDirty = false;
           this._showToast(`💾 Zone ${curZ} coordinates saved to ESP32!`);
+          this._renderZoneCardsAndStepper();
           this._updateViewfinder();
         });
       }
@@ -6153,6 +6304,16 @@ class RadarCalibrationCard extends HTMLElement {
         if (input) {
           input.addEventListener("input", () => {
             this._zoneDirty = true;
+            if (this._mapEditMode) {
+              this._zoneEditCoords[curZ] = {
+                x1: Math.round(parseFloat(stepContent.querySelector("#inpZone_x1")?.value) || 0),
+                y1: Math.round(parseFloat(stepContent.querySelector("#inpZone_y1")?.value) || 0),
+                x2: Math.round(parseFloat(stepContent.querySelector("#inpZone_x2")?.value) || 0),
+                y2: Math.round(parseFloat(stepContent.querySelector("#inpZone_y2")?.value) || 0),
+                angle: Math.round(parseFloat(stepContent.querySelector("#inpZone_angle")?.value) || 0)
+              };
+              this._modifiedZones.add(curZ);
+            }
             this._updateViewfinder();
           });
         }
@@ -6166,11 +6327,18 @@ class RadarCalibrationCard extends HTMLElement {
           const input = stepContent.querySelector(`#inpZone_${coord}`);
           if (input) {
             const currentVal = parseFloat(input.value) || 0;
-            const newVal = currentVal + delta;
+            const newVal = Math.round(currentVal + delta);
             input.value = newVal;
+            if (this._zoneEditCoords && this._zoneEditCoords[curZ]) {
+              this._zoneEditCoords[curZ][coord] = newVal;
+              if (!this._mapEditMode) {
+                this._zoneEditCoords[curZ]._savedAt = Date.now();
+              }
+            }
             // Nudges are written to the ESP32 immediately, so they don't count as unsaved edits
             const entityId = ent[`zone${curZ}_${coord}`];
             this._setNumber(entityId, newVal);
+            this._renderZoneCardsAndStepper();
             this._updateViewfinder();
           }
         });
