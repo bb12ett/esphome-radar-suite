@@ -3776,11 +3776,18 @@ class RadarCalibrationCard extends HTMLElement {
           overflow: hidden;
           margin: 10px 0 14px 0;
           position: relative;
-          touch-action: none;
+          touch-action: pan-y;
+        }
+        .mini-viewfinder svg {
+          touch-action: pan-y;
         }
         .mini-viewfinder.editing {
           border: 2px solid #38bdf8;
           box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+          touch-action: none;
+        }
+        .mini-viewfinder.editing svg {
+          touch-action: none;
         }
         .vf-handle {
           pointer-events: all;
