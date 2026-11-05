@@ -952,12 +952,18 @@ class RadarUpdateManager {
           <button id="${idPrefix}BtnDismissBanner" class="radar-update-btn-close" title="Dismiss for this session">✕</button>
         </div>
         <div class="radar-update-actions">
-          <button id="${idPrefix}BtnTriggerUpdate" class="btn-update-primary">
-            🚀 ${status.updateEntity ? 'Update Firmware in HA' : 'Open ESPHome Dashboard'}
-          </button>
-          <a id="${idPrefix}BtnOpenDashboard" href="${espPath}" class="btn-update-secondary" style="text-decoration:none; cursor:pointer;">
-            🛠️ ESPHome Dashboard
-          </a>
+          ${status.updateEntity ? `
+            <button id="${idPrefix}BtnTriggerUpdate" class="btn-update-primary">
+              🚀 Update Firmware in HA
+            </button>
+            <a id="${idPrefix}BtnOpenDashboard" href="${espPath}" class="btn-update-secondary" style="text-decoration:none; cursor:pointer;">
+              🛠️ ESPHome Dashboard
+            </a>
+          ` : `
+            <a id="${idPrefix}BtnOpenDashboard" href="${espPath}" class="btn-update-primary" style="text-decoration:none; cursor:pointer;">
+              🚀 Open ESPHome Dashboard
+            </a>
+          `}
           <button id="${idPrefix}BtnViewGuide" class="btn-update-link">
             📋 YAML Setup Guide
           </button>
@@ -982,16 +988,10 @@ class RadarUpdateManager {
 
     const btnUpdate = shadowRoot.getElementById(`${idPrefix}BtnTriggerUpdate`);
     if (btnUpdate) {
-      btnUpdate.addEventListener("click", (e) => {
+      btnUpdate.addEventListener("click", () => {
         const status = this.checkStatus(cardInstance._hass, cardInstance._entities, devicePrefix);
         if (status && status.updateEntity && cardInstance._hass.states[status.updateEntity]) {
           cardInstance._openMoreInfo(status.updateEntity);
-        } else {
-          if (!e.ctrlKey && !e.metaKey && e.button === 0) {
-            e.preventDefault();
-            const espPath = this.getEspHomePath(cardInstance._hass);
-            this.navigateTo(btnUpdate, espPath);
-          }
         }
       });
     }
