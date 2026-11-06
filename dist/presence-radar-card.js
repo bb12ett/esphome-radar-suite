@@ -2577,7 +2577,7 @@ class RadarMapCard extends HTMLElement {
             <defs>
               <radialGradient id="beamGradient" cx="50%" cy="0%" r="100%">
                 <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3" />
-                <stop offset="60%" stop-color="#0284c7" stop-opacity="0.08" />
+                <stop offset="70%" stop-color="#0284c7" stop-opacity="0.05" />
                 <stop offset="100%" stop-color="#0284c7" stop-opacity="0" />
               </radialGradient>
               <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
@@ -3921,7 +3921,7 @@ class RadarCalibrationCard extends HTMLElement {
         }
         .mini-viewfinder {
           width: 100%;
-          aspect-ratio: 16 / 10;
+          aspect-ratio: 4 / 3;
           background: radial-gradient(circle at 50% 10%, #1e293b 0%, #0f172a 80%);
           border-radius: 12px;
           border: 1px solid var(--border-color);
