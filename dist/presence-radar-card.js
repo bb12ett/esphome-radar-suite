@@ -2275,6 +2275,7 @@ class RadarMapCard extends HTMLElement {
           position: relative;
           width: 100%;
           aspect-ratio: 4 / 3;
+          max-height: 75vh;
           background: radial-gradient(circle at 50% 10%, #1e293b 0%, #0f172a 80%);
           border-radius: 12px;
           border: 1px solid var(--border-color);
@@ -2776,11 +2777,17 @@ class RadarMapCard extends HTMLElement {
       const margin = 500;
       const minVbX = Math.min(0, geom.sx) - margin;
       const maxVbX = Math.max(geom.roomWidth, geom.sx) + margin;
-      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${maxVbX - minVbX} ${geom.roomDepth + margin * 2}`);
+      const vbW = maxVbX - minVbX;
+      const vbH = geom.roomDepth + margin * 2;
+      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${vbW} ${vbH}`);
       const clipRect = this.shadowRoot.getElementById("radarRoomClipRect");
       if (clipRect) {
         clipRect.setAttribute("width", geom.roomWidth);
         clipRect.setAttribute("height", geom.roomDepth);
+      }
+      const viewport = this.shadowRoot.querySelector(".map-viewport");
+      if (viewport && vbW > 0 && vbH > 0) {
+        viewport.style.aspectRatio = `${vbW} / ${vbH}`;
       }
     }
 
@@ -3922,6 +3929,7 @@ class RadarCalibrationCard extends HTMLElement {
         .mini-viewfinder {
           width: 100%;
           aspect-ratio: 4 / 3;
+          max-height: 75vh;
           background: radial-gradient(circle at 50% 10%, #1e293b 0%, #0f172a 80%);
           border-radius: 12px;
           border: 1px solid var(--border-color);
@@ -5501,11 +5509,17 @@ class RadarCalibrationCard extends HTMLElement {
       const margin = 500;
       const minVbX = Math.min(0, sx) - margin;
       const maxVbX = Math.max(rw, sx) + margin;
-      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${maxVbX - minVbX} ${rd + margin * 2}`);
+      const vbW = maxVbX - minVbX;
+      const vbH = rd + margin * 2;
+      svg.setAttribute("viewBox", `${minVbX} ${-margin} ${vbW} ${vbH}`);
       const vfClipRect = this.shadowRoot.getElementById("vfRoomClipRect");
       if (vfClipRect) {
         vfClipRect.setAttribute("width", rw);
         vfClipRect.setAttribute("height", rd);
+      }
+      const vfBox = this.shadowRoot.getElementById("miniViewfinderBox");
+      if (vfBox && vbW > 0 && vbH > 0) {
+        vfBox.style.aspectRatio = `${vbW} / ${vbH}`;
       }
     }
 
