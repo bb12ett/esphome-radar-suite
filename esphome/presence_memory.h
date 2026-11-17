@@ -133,6 +133,11 @@ struct OccupantRecord {
 // shortly after and within realistic walking distance of where that occupant was last seen.
 // This handles LD2450 slot swaps while preventing a distant passerby from unlatching someone else.
 static const uint32_t REACQUIRE_WINDOW_MS = 3000;
+static const float SLOT_SWAP_MATCH_MM = 400.0f;
+static const float WAKE_ORIGIN_RADIUS_MM = 1200.0f;
+static const float WAKE_UNLATCH_RADIUS_MM = 1400.0f;
+static const float WAKE_MIN_SPEED_MMS = 120.0f;
+
 inline bool plausibly_same_person(const TargetData &last, const TargetData &now_t, uint32_t elapsed_ms) {
   if (elapsed_ms > REACQUIRE_WINDOW_MS) return false;
   float max_move = 600.0f + 1.6f * static_cast<float>(elapsed_ms);  // ~1.6 m/s walking + radar jitter
@@ -156,6 +161,149 @@ inline bool is_point_in_zone(float x1, float y1, float x2, float y2, float angle
   float u = 0, v = 0;
   rotate_point(px - cx, py - cy, -angle_deg, u, v);
   return fabsf(u) <= half_w && fabsf(v) <= half_h;
+}
+
+// When a target has been latched stationary (> REACQUIRE_WINDOW_MS) and then wakes up and steps
+// directly outside the zone/room without hitting an inside frame first, allow an unlatch if a
+// non-preexisting moving target appears right next to the latched position.
+inline bool plausibly_woke_up(const TargetData &last, const TargetData &now_t) {
+  if (fabsf(now_t.speed) < WAKE_MIN_SPEED_MMS) return false;
+  return std::hypot(now_t.x - last.x, now_t.y - last.y) <= WAKE_UNLATCH_RADIUS_MM;
+}
+
+// Matches each active slot in curr_mask to the closest unused slot in prev_mask within max_mm
+// (breaking ties in favor of the same slot index). out_match[i] is -1 if unmatched.
+inline void match_previous_slots(const TargetData curr[3],
+                                 uint8_t curr_mask,
+                                 const TargetData prev[3],
+                                 uint8_t prev_mask,
+                                 float max_mm,
+                                 int out_match[3]) {
+  for (int i = 0; i < 3; i++) out_match[i] = -1;
+  uint8_t curr_used = 0;
+  uint8_t prev_used = 0;
+
+  for (int iter = 0; iter < 3; iter++) {
+    int best_i = -1;
+    int best_k = -1;
+    float best_d = max_mm + 1.0f;
+    for (int i = 0; i < 3; i++) {
+      if (!(curr_mask & (1u << i)) || (curr_used & (1u << i))) continue;
+      for (int k = 0; k < 3; k++) {
+        if (!(prev_mask & (1u << k)) || (prev_used & (1u << k))) continue;
+        float d = std::hypot(curr[i].x - prev[k].x, curr[i].y - prev[k].y);
+        if (d > max_mm) continue;
+        if (d < best_d - 1e-3f || (fabsf(d - best_d) <= 1e-3f && i == k)) {
+          best_d = d;
+          best_i = i;
+          best_k = k;
+        }
+      }
+    }
+    if (best_i < 0) break;
+    out_match[best_i] = best_k;
+    curr_used |= (1u << best_i);
+    prev_used |= (1u << best_k);
+  }
+}
+
+// Updates per-slot OccupantRecord history while preserving identity across LD2450 slot swaps.
+// Without this, a stationary occupant swapping from slot A to slot B resets first_seen_ms and
+// triggers transient was_moving = true, causing false unlatches near room walls.
+inline void update_inside_records(OccupantRecord rec[3],
+                                  const TargetData prev_targets[3],
+                                  uint8_t prev_inside_mask,
+                                  uint32_t prev_inside_ms,
+                                  const TargetData targets[3],
+                                  uint8_t inside_mask,
+                                  uint32_t now) {
+  OccupantRecord prev_rec[3];
+  uint8_t valid_prev_mask = 0;
+  for (int k = 0; k < 3; k++) {
+    prev_rec[k] = rec[k];
+    if ((prev_inside_mask & (1u << k)) && prev_rec[k].first_seen_ms != 0) {
+      valid_prev_mask |= (1u << k);
+    }
+  }
+
+  int match[3] = {-1, -1, -1};
+  if (prev_inside_ms != 0 && (now - prev_inside_ms) <= 2000 && valid_prev_mask != 0) {
+    match_previous_slots(targets, inside_mask, prev_targets, valid_prev_mask, SLOT_SWAP_MATCH_MM, match);
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (inside_mask & (1u << i)) {
+      if (match[i] >= 0) {
+        rec[i] = prev_rec[match[i]];
+      } else {
+        rec[i].clear();
+      }
+      rec[i].record(targets[i], now);
+    } else {
+      rec[i].clear();
+    }
+  }
+}
+
+// Tracks which outside targets already existed (or originated far from any latched occupant)
+// so a bystander walking past a latched sofa/zone cannot unlatch the stationary occupant.
+inline uint8_t update_external_outside_mask(const TargetData targets[3],
+                                            uint8_t inside_mask,
+                                            const TargetData prev_raw_targets[3],
+                                            uint8_t prev_raw_mask,
+                                            uint8_t prev_external_mask,
+                                            const OccupantRecord rec[3],
+                                            uint8_t occupants_mask,
+                                            bool mark_all_outside_as_external) {
+  uint8_t next_ext = 0;
+  uint8_t outside_mask = 0;
+  for (int j = 0; j < 3; j++) {
+    if (inside_mask & (1u << j)) continue;
+    if (is_raw_tracked(targets[j])) {
+      outside_mask |= (1u << j);
+    }
+  }
+
+  if (mark_all_outside_as_external) {
+    return outside_mask;
+  }
+
+  int match[3] = {-1, -1, -1};
+  match_previous_slots(targets, outside_mask, prev_raw_targets, prev_raw_mask, SLOT_SWAP_MATCH_MM, match);
+
+  for (int j = 0; j < 3; j++) {
+    if (!(outside_mask & (1u << j))) continue;
+    if (match[j] >= 0) {
+      if (prev_external_mask & (1u << match[j])) {
+        next_ext |= (1u << j);
+      }
+    } else {
+      // Brand new outside target: mark external unless it originated close to an unaccounted occupant
+      bool near_occupant = false;
+      for (int i = 0; i < 3; i++) {
+        if (!(occupants_mask & (1u << i))) continue;
+        if (std::hypot(targets[j].x - rec[i].last_pos.x, targets[j].y - rec[i].last_pos.y) <= WAKE_ORIGIN_RADIUS_MM) {
+          near_occupant = true;
+          break;
+        }
+      }
+      if (!near_occupant) {
+        next_ext |= (1u << j);
+      }
+    }
+  }
+
+  return next_ext;
+}
+
+inline void snapshot_raw_targets(const TargetData targets[3], TargetData out_targets[3], uint8_t &out_mask) {
+  out_mask = 0;
+  for (int i = 0; i < 3; i++) {
+    out_targets[i] = targets[i];
+    if (is_raw_tracked(targets[i])) {
+      out_mask |= (1u << i);
+    }
+  }
 }
 
 class ZoneCalibrator {
@@ -195,6 +343,56 @@ class ZoneCalibrator {
     return false;
   }
 };
+
+// Accounts for each vanished occupant using either a matching outside target (immediate exit
+// or waking up near the latched spot) or moving disappearance right at a room exit.
+template <typename IsInsideFn>
+inline void account_for_vanished_occupants(OccupantRecord rec[3],
+                                           uint8_t &occupants_mask,
+                                           uint8_t &outside_used_mask,
+                                           uint8_t external_mask,
+                                           const TargetData targets[3],
+                                           const RoomBounds &room,
+                                           float max_dist_mm,
+                                           float exit_margin_mm,
+                                           uint32_t since,
+                                           bool is_latched,
+                                           IsInsideFn is_inside) {
+  for (int i = 0; i < 3; i++) {
+    uint8_t bit = (1u << i);
+    if (!(occupants_mask & bit)) continue;
+
+    bool accounted = false;
+    // 1. Check any non-external raw-tracked target outside the zone/room
+    for (int j = 0; j < 3; j++) {
+      uint8_t jbit = (1u << j);
+      if (outside_used_mask & jbit) continue;
+      if (external_mask & jbit) continue;
+      if (!is_raw_tracked(targets[j])) continue;
+      if (is_inside(targets[j])) continue;
+
+      bool matched_exit = (since <= REACQUIRE_WINDOW_MS)
+                              ? plausibly_same_person(rec[i].last_pos, targets[j], since)
+                              : (is_latched && plausibly_woke_up(rec[i].last_pos, targets[j]));
+      if (matched_exit) {
+        outside_used_mask |= jbit;
+        accounted = true;
+        break;
+      }
+    }
+
+    // 2. Or vanished while actively moving right at a room exit / max range
+    if (!accounted && rec[i].was_moving &&
+        near_room_exit(room, rec[i].last_pos, max_dist_mm, exit_margin_mm)) {
+      accounted = true;
+    }
+
+    if (accounted) {
+      occupants_mask &= ~bit;
+      rec[i].clear();
+    }
+  }
+}
 
 // Zone occupancy with stationary memory (vanish protection).
 //
@@ -256,15 +454,22 @@ class ZoneTracker {
       if (point_in_zone(t.x, t.y)) {
         inside_mask |= (1u << i);
         inside_count++;
-        this->rec_[i].record(t, now);
       }
     }
     target_count = inside_count;
 
     if (inside_count > 0) {
+      update_inside_records(this->rec_, this->prev_inside_targets_, this->prev_inside_mask_,
+                            this->last_inside_ms, targets, inside_mask, now);
       for (int i = 0; i < 3; i++) {
-        if (!(inside_mask & (1u << i))) this->rec_[i].clear();
+        this->prev_inside_targets_[i] = targets[i];
       }
+      this->prev_inside_mask_ = inside_mask;
+      this->external_mask_ = update_external_outside_mask(
+          targets, inside_mask, this->prev_raw_targets_, this->prev_raw_mask_,
+          this->external_mask_, this->rec_, inside_mask, true);
+      snapshot_raw_targets(targets, this->prev_raw_targets_, this->prev_raw_mask_);
+
       occupied = true;
       latched = false;
       last_inside_ms = now;
@@ -282,36 +487,15 @@ class ZoneTracker {
     uint32_t off_delay_ms = static_cast<uint32_t>(off_delay_sec * 1000.0f);
     uint32_t latch_timeout_ms = static_cast<uint32_t>(latch_timeout_min * 60.0f * 1000.0f);
 
-    // Account for each person who was inside the zone on the last occupied frame
-    for (int i = 0; i < 3; i++) {
-      uint8_t bit = (1u << i);
-      if (!(this->occupants_ & bit)) continue;
+    this->external_mask_ = update_external_outside_mask(
+        targets, 0, this->prev_raw_targets_, this->prev_raw_mask_,
+        this->external_mask_, this->rec_, this->occupants_, false);
+    snapshot_raw_targets(targets, this->prev_raw_targets_, this->prev_raw_mask_);
 
-      bool accounted = false;
-      // 1. Check any raw-tracked target outside the zone (handles both in-room exit & cross-wall exit)
-      for (int j = 0; j < 3; j++) {
-        uint8_t jbit = (1u << j);
-        if (this->outside_used_mask_ & jbit) continue;
-        if (!is_raw_tracked(targets[j])) continue;
-        if (point_in_zone(targets[j].x, targets[j].y)) continue;
-        if (plausibly_same_person(this->rec_[i].last_pos, targets[j], since)) {
-          this->outside_used_mask_ |= jbit;
-          accounted = true;
-          break;
-        }
-      }
-
-      // 2. Or vanished while actively moving right at a room exit / max range
-      if (!accounted && this->rec_[i].was_moving &&
-          near_room_exit(room, this->rec_[i].last_pos, max_dist_mm, exit_margin_mm)) {
-        accounted = true;
-      }
-
-      if (accounted) {
-        this->occupants_ &= ~bit;
-        this->rec_[i].clear();
-      }
-    }
+    account_for_vanished_occupants(
+        this->rec_, this->occupants_, this->outside_used_mask_, this->external_mask_,
+        targets, room, max_dist_mm, exit_margin_mm, since, latched,
+        [&](const TargetData &t) { return point_in_zone(t.x, t.y); });
 
     bool someone_unaccounted = (this->occupants_ != 0);
 
@@ -337,13 +521,22 @@ class ZoneTracker {
     occupied = false;
     latched = false;
     target_count = 0;
+    last_inside_ms = 0;
     this->occupants_ = 0;
     this->outside_used_mask_ = 0;
+    this->prev_inside_mask_ = 0;
+    this->prev_raw_mask_ = 0;
+    this->external_mask_ = 0;
     for (int i = 0; i < 3; i++) this->rec_[i].clear();
   }
 
   uint8_t occupants_{0};
   uint8_t outside_used_mask_{0};
+  uint8_t prev_inside_mask_{0};
+  uint8_t prev_raw_mask_{0};
+  uint8_t external_mask_{0};
+  TargetData prev_inside_targets_[3];
+  TargetData prev_raw_targets_[3];
   OccupantRecord rec_[3];
 };
 
@@ -373,15 +566,22 @@ class RoomTracker {
       if (inside_room(room, t, max_dist_mm)) {
         mask |= (1u << i);
         count++;
-        this->rec_[i].record(t, now);
       }
     }
     target_count = count;
 
     if (count > 0) {
+      update_inside_records(this->rec_, this->prev_inside_targets_, this->prev_inside_mask_,
+                            this->last_seen_ms, targets, mask, now);
       for (int i = 0; i < 3; i++) {
-        if (!(mask & (1u << i))) this->rec_[i].clear();
+        this->prev_inside_targets_[i] = targets[i];
       }
+      this->prev_inside_mask_ = mask;
+      this->external_mask_ = update_external_outside_mask(
+          targets, mask, this->prev_raw_targets_, this->prev_raw_mask_,
+          this->external_mask_, this->rec_, mask, true);
+      snapshot_raw_targets(targets, this->prev_raw_targets_, this->prev_raw_mask_);
+
       occupied = true;
       latched = false;
       last_seen_ms = now;
@@ -399,36 +599,15 @@ class RoomTracker {
     uint32_t timeout_ms = static_cast<uint32_t>(timeout_sec * 1000.0f);
     uint32_t latch_timeout_ms = static_cast<uint32_t>(latch_timeout_min * 60.0f * 1000.0f);
 
-    // Account for each occupant who was inside the room on the last occupied frame
-    for (int i = 0; i < 3; i++) {
-      uint8_t bit = (1u << i);
-      if (!(this->occupants_ & bit)) continue;
+    this->external_mask_ = update_external_outside_mask(
+        targets, 0, this->prev_raw_targets_, this->prev_raw_mask_,
+        this->external_mask_, this->rec_, this->occupants_, false);
+    snapshot_raw_targets(targets, this->prev_raw_targets_, this->prev_raw_mask_);
 
-      bool accounted = false;
-      // 1. Observed stepping outside the room boundaries / beyond max_dist_mm on raw radar
-      for (int j = 0; j < 3; j++) {
-        uint8_t jbit = (1u << j);
-        if (this->outside_used_mask_ & jbit) continue;
-        if (!is_raw_tracked(targets[j])) continue;
-        if (inside_room(room, targets[j], max_dist_mm)) continue;
-        if (plausibly_same_person(this->rec_[i].last_pos, targets[j], since)) {
-          this->outside_used_mask_ |= jbit;
-          accounted = true;
-          break;
-        }
-      }
-
-      // 2. Or vanished while actively moving within exit_margin_mm of a room boundary / max range
-      if (!accounted && this->rec_[i].was_moving &&
-          near_room_exit(room, this->rec_[i].last_pos, max_dist_mm, exit_margin_mm)) {
-        accounted = true;
-      }
-
-      if (accounted) {
-        this->occupants_ &= ~bit;
-        this->rec_[i].clear();
-      }
-    }
+    account_for_vanished_occupants(
+        this->rec_, this->occupants_, this->outside_used_mask_, this->external_mask_,
+        targets, room, max_dist_mm, exit_margin_mm, since, latched,
+        [&](const TargetData &t) { return inside_room(room, t, max_dist_mm); });
 
     // If any configured sub-zone is currently latched, hold room occupancy as well
     if (any_zone_latched) {
@@ -460,13 +639,22 @@ class RoomTracker {
     occupied = false;
     latched = false;
     target_count = 0;
+    last_seen_ms = 0;
     this->occupants_ = 0;
     this->outside_used_mask_ = 0;
+    this->prev_inside_mask_ = 0;
+    this->prev_raw_mask_ = 0;
+    this->external_mask_ = 0;
     for (int i = 0; i < 3; i++) this->rec_[i].clear();
   }
 
   uint8_t occupants_{0};
   uint8_t outside_used_mask_{0};
+  uint8_t prev_inside_mask_{0};
+  uint8_t prev_raw_mask_{0};
+  uint8_t external_mask_{0};
+  TargetData prev_inside_targets_[3];
+  TargetData prev_raw_targets_[3];
   OccupantRecord rec_[3];
 };
 
