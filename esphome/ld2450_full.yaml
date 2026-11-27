@@ -9,6 +9,7 @@ substitutions:
   board: "esp32-c3-devkitm-1"
   tx_pin: "GPIO21"
   rx_pin: "GPIO20"
+  wifi_output_power: "8.5dB"  # 8.5dB improves Wi-Fi stability on ESP32-C3 SuperMini; set to "20dB" for standard ESP32 boards
 
 esphome:
   name: "${node_name}"
@@ -25,22 +26,22 @@ esphome:
 
 esp32:
   board: "${board}"
-  variant: esp32c3
   framework:
     type: esp-idf
 
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  output_power: 8.5dB
+  output_power: ${wifi_output_power}
 
 logger:
   level: INFO
-  hardware_uart: USB_SERIAL_JTAG
+  baud_rate: 0  # Disables hardware serial logging so UART0 can safely be used by the LD2450 (wireless API logs still work)
 
 api:
 ota:
-  platform: esphome
+  - platform: esphome
+    id: radar_ota
 
 # --------------------------------------------------------------------
 # 1. HARDWARE UART BUS FOR LD2450
@@ -571,7 +572,7 @@ number:
     name: "Sensor Mounting Angle"
     id: sensor_mounting_angle
     entity_category: config
-    unit_of_measurement: "Â°"
+    unit_of_measurement: "°"
     icon: "mdi:rotate-3d-variant"
     min_value: -90
     max_value: 90

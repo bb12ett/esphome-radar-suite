@@ -221,19 +221,50 @@ The repository provides ready-to-use ESPHome setups designed for zero-friction o
 ### 1. ⚡ Remote GitHub Package (Recommended - Auto-updating)
 No downloading files or copying directories needed! ESPHome fetches the entire suite directly from GitHub and automatically keeps it up-to-date whenever you compile.
 
-Create a new device in your ESPHome Dashboard and paste this 10-line configuration:
+Create a new device in your ESPHome Dashboard and paste this configuration:
+
+#### ESP32-C3 SuperMini
+```yaml
+substitutions:
+  node_name: "living-room-presence"
+  friendly_name: "Living Room Presence"
+  board: "esp32-c3-devkitm-1"
+  tx_pin: "GPIO21"            # Connect to LD2450 RX
+  rx_pin: "GPIO20"            # Connect to LD2450 TX
+  wifi_output_power: "8.5dB"  # Improves Wi-Fi stability on C3 SuperMini
+
+packages:
+  radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main
+```
+
+#### Standard ESP32 (`esp32dev` / `d1_mini32` / `esp32-s3-devkitc-1`)
+ESPHome automatically detects the chip `variant` from `board:` and disables hardware serial logging (`baud_rate: 0`) so any hardware UART pins can be used safely:
 
 ```yaml
 substitutions:
   node_name: "living-room-presence"
   friendly_name: "Living Room Presence"
-  tx_pin: "GPIO21"      # Connect to LD2450 RX
-  rx_pin: "GPIO20"      # Connect to LD2450 TX
-  board: "esp32-c3-devkitm-1"
+  board: "esp32dev"
+  tx_pin: "GPIO17"            # UART2 TX -> LD2450 RX
+  rx_pin: "GPIO16"            # UART2 RX -> LD2450 TX
+  wifi_output_power: "20dB"
 
 packages:
   radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main
 ```
+
+> [!TIP]
+> **Re-flashing an existing device with API/OTA encryption?**
+> Add your existing credentials below `packages:` — ESPHome merges `api:` automatically and supports `!extend radar_ota` on the package's OTA entry:
+> ```yaml
+> api:
+>   encryption:
+>     key: "your-existing-api-key"
+>
+> ota:
+>   - id: !extend radar_ota
+>     password: "your-existing-ota-password"
+> ```
 
 ### 2. Manual Offline Package Setup
 For users who prefer to store all YAML files locally or run Home Assistant without internet access:

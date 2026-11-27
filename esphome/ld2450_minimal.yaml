@@ -7,6 +7,7 @@
 substitutions:
   node_name: "ld2450-presence"
   friendly_name: "Room Presence"
+  board: "esp32-c3-devkitm-1"
   tx_pin: "GPIO21"
   rx_pin: "GPIO20"
 
@@ -16,7 +17,7 @@ esphome:
   min_version: 2024.6.0
 
 esp32:
-  board: esp32-c3-devkitm-1
+  board: "${board}"
   framework:
     type: esp-idf
 
@@ -26,10 +27,12 @@ wifi:
 
 logger:
   level: INFO
+  baud_rate: 0
 
 api:
 ota:
-  platform: esphome
+  - platform: esphome
+    id: radar_ota
 
 # 1. HARDWARE UART BUS
 uart:

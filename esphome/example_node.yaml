@@ -6,9 +6,29 @@
 substitutions:
   node_name: "living-room-presence"
   friendly_name: "Living Room Presence"
-  tx_pin: "GPIO21"      # Connect to LD2450 RX
-  rx_pin: "GPIO20"      # Connect to LD2450 TX
+  # ESP32-C3 SuperMini defaults:
   board: "esp32-c3-devkitm-1"
+  tx_pin: "GPIO21"            # Connect to LD2450 RX
+  rx_pin: "GPIO20"            # Connect to LD2450 TX
+  wifi_output_power: "8.5dB"  # Stability workaround for C3 SuperMini
+  #
+  # For Standard ESP32 (esp32dev) / D1 Mini ESP32, use instead:
+  # board: "esp32dev"
+  # tx_pin: "GPIO17"          # UART2 TX -> LD2450 RX
+  # rx_pin: "GPIO16"          # UART2 RX -> LD2450 TX
+  # wifi_output_power: "20dB"
 
 packages:
   radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main
+
+# Optional: If re-flashing an existing device that already uses API/OTA encryption:
+# api:
+#   encryption:
+#     key: "your-existing-api-encryption-key"
+#
+# ota:
+#   - id: !extend radar_ota
+#     password: "your-existing-ota-password"
+#     # Or for ESPHome OTA encryption:
+#     # encryption:
+#     #   key: "your-existing-ota-encryption-key"

@@ -1703,12 +1703,23 @@ class RadarSetupWizard {
       .replace(/^-+|-+$/g, "");
   }
 
+  static getBoardDefaults(board) {
+    if (board === "esp32-c3-devkitm-1") {
+      return { tx: "GPIO21", rx: "GPIO20", wifiPower: "8.5dB" };
+    }
+    if (board === "esp32-s3-devkitc-1") {
+      return { tx: "GPIO17", rx: "GPIO18", wifiPower: "20dB" };
+    }
+    return { tx: "GPIO17", rx: "GPIO16", wifiPower: "20dB" };
+  }
+
   static generateYaml(friendlyName, board, txPin, rxPin) {
     const fName = (friendlyName || "Living Room Presence").trim();
     const nodeName = this.toKebab(fName);
     const b = (board || "esp32-c3-devkitm-1").trim();
-    const tx = (txPin || "GPIO21").trim();
-    const rx = (rxPin || "GPIO20").trim();
+    const defaults = this.getBoardDefaults(b);
+    const tx = (txPin || defaults.tx).trim();
+    const rx = (rxPin || defaults.rx).trim();
 
     return `# ====================================================================
 # ESPHome Configuration for ${fName}
@@ -1718,9 +1729,10 @@ class RadarSetupWizard {
 substitutions:
   node_name: "${nodeName}"
   friendly_name: "${fName}"
+  board: "${b}"
   tx_pin: "${tx}"      # Connect to LD2450 RX
   rx_pin: "${rx}"      # Connect to LD2450 TX
-  board: "${b}"
+  wifi_output_power: "${defaults.wifiPower}"
 
 packages:
   radar_suite: github://bb12ett/esphome-radar-suite/esphome/ld2450_full.yaml@main
@@ -1760,6 +1772,7 @@ packages:
                 <option value="esp32-c3-devkitm-1" style="background:#1e293b; color:#f8fafc;" selected>ESP32-C3 SuperMini (Recommended)</option>
                 <option value="esp32dev" style="background:#1e293b; color:#f8fafc;">Standard ESP32 (esp32dev)</option>
                 <option value="d1_mini32" style="background:#1e293b; color:#f8fafc;">D1 Mini ESP32 (d1_mini32)</option>
+                <option value="esp32-s3-devkitc-1" style="background:#1e293b; color:#f8fafc;">ESP32-S3 (esp32-s3-devkitc-1)</option>
               </select>
             </div>
             <div>
@@ -1831,7 +1844,21 @@ packages:
     updateYaml();
 
     if (inpName) inpName.addEventListener("input", updateYaml);
-    if (selBoard) selBoard.addEventListener("change", updateYaml);
+    if (selBoard) {
+      let lastBoard = selBoard.value;
+      selBoard.addEventListener("change", () => {
+        const prevDefaults = this.getBoardDefaults(lastBoard);
+        const nextDefaults = this.getBoardDefaults(selBoard.value);
+        if (inpTx && inpTx.value.trim().toUpperCase() === prevDefaults.tx) {
+          inpTx.value = nextDefaults.tx;
+        }
+        if (inpRx && inpRx.value.trim().toUpperCase() === prevDefaults.rx) {
+          inpRx.value = nextDefaults.rx;
+        }
+        lastBoard = selBoard.value;
+        updateYaml();
+      });
+    }
     if (inpTx) inpTx.addEventListener("input", updateYaml);
     if (inpRx) inpRx.addEventListener("input", updateYaml);
 
