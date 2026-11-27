@@ -7,7 +7,7 @@
  * 2. <radar-calibration-card> (Lovelace: custom:radar-calibration-card / custom:presence-calibration-card)
  */
 
-const CARD_VERSION = "1.8.2";
+const CARD_VERSION = "1.9.0";
 window.customCards = window.customCards || [];
 
 const cardRegistrations = [

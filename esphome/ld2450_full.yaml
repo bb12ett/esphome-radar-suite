@@ -475,7 +475,7 @@ text_sensor:
     entity_category: diagnostic
     icon: "mdi:tag-outline"
     lambda: |-
-      return std::string("1.8.0");
+      return std::string("1.9.0");
 
 
 # --------------------------------------------------------------------

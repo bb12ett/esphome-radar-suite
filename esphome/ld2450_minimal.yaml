@@ -201,7 +201,7 @@ text_sensor:
     entity_category: diagnostic
     icon: "mdi:tag-outline"
     lambda: |-
-      return std::string("1.8.0");
+      return std::string("1.9.0");
 
 # 5. CONFIGURATION NUMBERS (ROOM BOUNDARIES & ZONES 1-4)
 number:
